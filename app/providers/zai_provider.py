@@ -587,7 +587,7 @@ class ZAIProvider(BaseProvider):
                                     delta_content = data.get("delta_content", "")
                                     if delta_content:
                                         content = delta_content.split("</summary>\n>")[-1].strip() if delta_content.startswith("<details") and "</summary>\n>" in delta_content else delta_content
-                                        thinking_chunk = self.create_openai_chunk(chat_id, model, {"role": "assistant", "thinking": {"content": content}})
+                                        thinking_chunk = self.create_openai_chunk(chat_id, model, {"role": "assistant", "reasoning_content":  content.replace("\n>","\n")})
                                         yield await self.format_sse_chunk(thinking_chunk)
                                 elif phase == "answer":
                                     edit_content = data.get("edit_content", "")
