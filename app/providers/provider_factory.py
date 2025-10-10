@@ -119,8 +119,9 @@ class ProviderRouter:
         self.factory = ProviderFactory()
     
     async def route_request(
-        self, 
+        self,
         request: OpenAIRequest,
+        client_api_key: Optional[str] = None,
         **kwargs
     ) -> Union[Dict[str, Any], AsyncGenerator[str, None]]:
         """路由请求到合适的提供商"""
@@ -142,8 +143,8 @@ class ProviderRouter:
         logger.info(f"✅ 使用提供商: {provider.name}")
         
         try:
-            # 调用提供商处理请求
-            result = await provider.chat_completion(request, **kwargs)
+            # 调用提供商处理请求，传递客户端 api_key
+            result = await provider.chat_completion(request, client_api_key=client_api_key, **kwargs)
             logger.info(f"🎉 请求处理完成: {provider.name}")
             return result
             

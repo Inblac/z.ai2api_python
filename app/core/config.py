@@ -177,6 +177,9 @@ class Settings(BaseSettings):
     TOOL_SUPPORT: bool = os.getenv("TOOL_SUPPORT", "true").lower() == "true"
     SCAN_LIMIT: int = int(os.getenv("SCAN_LIMIT", "200000"))
     SKIP_AUTH_TOKEN: bool = os.getenv("SKIP_AUTH_TOKEN", "false").lower() == "true"
+    
+    # 是否使用客户端传递的 api_key 作为 Z.AI 认证 token
+    USE_CLIENT_TOKEN: bool = os.getenv("USE_CLIENT_TOKEN", "false").lower() == "true"
 
     # LongCat Configuration
     LONGCAT_PASSPORT_TOKEN: Optional[str] = os.getenv("LONGCAT_PASSPORT_TOKEN")

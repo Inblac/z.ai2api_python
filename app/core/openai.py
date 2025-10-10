@@ -3,7 +3,7 @@
 
 import time
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 
@@ -28,7 +28,7 @@ def get_provider_router_instance():
     return provider_router
 
 
-def create_chunk(chat_id: str, model: str, delta: Dict[str, Any], finish_reason: str = None) -> Dict[str, Any]:
+def create_chunk(chat_id: str, model: str, delta: Dict[str, Any], finish_reason: Optional[str] = None) -> Dict[str, Any]:
     """创建标准的 OpenAI chunk 结构"""
     return {
         "choices": [{
@@ -115,24 +115,31 @@ async def list_models():
 
 
 @router.post("/v1/chat/completions")
-async def chat_completions(request: OpenAIRequest, authorization: str = Header(...)):
+async def chat_completions(request: OpenAIRequest, authorization: str = Header(None)):
     """Handle chat completion requests with multi-provider architecture"""
     role = request.messages[0].role if request.messages else "unknown"
     logger.info(f"😶‍🌫️ 收到客户端请求 - 模型: {request.model}, 流式: {request.stream}, 消息数: {len(request.messages)}, 角色: {role}, 工具数: {len(request.tools) if request.tools else 0}")
 
     try:
+        # 提取客户端 api_key（无论是否跳过认证）
+        client_api_key = None
+        if authorization and authorization.startswith("Bearer "):
+            client_api_key = authorization[7:]
+
         # Validate API key (skip if SKIP_AUTH_TOKEN is enabled)
         if not settings.SKIP_AUTH_TOKEN:
-            if not authorization.startswith("Bearer "):
+            if not authorization or not authorization.startswith("Bearer "):
                 raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
 
-            api_key = authorization[7:]
-            if api_key != settings.AUTH_TOKEN:
+            if not client_api_key:
+                raise HTTPException(status_code=401, detail="Missing API key")
+            
+            if client_api_key != settings.AUTH_TOKEN:
                 raise HTTPException(status_code=401, detail="Invalid API key")
 
-        # 使用多提供商路由器处理请求
+        # 使用多提供商路由器处理请求，传递客户端 api_key
         router_instance = get_provider_router_instance()
-        result = await router_instance.route_request(request)
+        result = await router_instance.route_request(request, client_api_key=client_api_key)
 
         # 检查是否有错误
         if isinstance(result, dict) and "error" in result:

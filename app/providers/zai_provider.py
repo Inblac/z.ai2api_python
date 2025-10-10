@@ -43,6 +43,9 @@ class ZAIProvider(BaseProvider):
         self.base_url = "https://chat.z.ai"
         self.auth_url = f"{self.base_url}/api/v1/auths/"
         
+        # 存储客户端传递的 token
+        self._client_token = None
+        
         # 模型映射
         self.model_mapping = {
             settings.PRIMARY_MODEL: "0727-360B-API",  # GLM-4.5
@@ -68,6 +71,11 @@ class ZAIProvider(BaseProvider):
     
     async def get_token(self) -> str:
         """获取认证令牌"""
+        # 如果启用客户端 token 模式且有客户端 token，优先使用
+        if settings.USE_CLIENT_TOKEN and self._client_token and not settings.ANONYMOUS_MODE:
+            self.logger.debug(f"使用客户端传递的 token: {self._client_token[:20]}...")
+            return self._client_token
+        
         # 如果启用匿名模式，只尝试获取访客令牌
         if settings.ANONYMOUS_MODE:
             try:
@@ -355,8 +363,11 @@ class ZAIProvider(BaseProvider):
     async def chat_completion(
         self,
         request: OpenAIRequest,
+        client_api_key: Optional[str] = None,
     ) -> Union[Dict[str, Any], AsyncGenerator[str, None]]:
         """聊天完成接口"""
+        # 存储客户端 token
+        self._client_token = client_api_key
         self.log_request(request)
 
         try:

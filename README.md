@@ -194,6 +194,7 @@ docker run -d \
 | `SKIP_AUTH_TOKEN`     | `false`                                   | 跳过认证令牌验证       |
 | `SCAN_LIMIT`          | `200000`                                  | 扫描限制               |
 | `AUTH_TOKENS_FILE`    | `tokens.txt`                              | Z.AI 认证token文件路径 |
+| `USE_CLIENT_TOKEN`    | `false`                                   | 使用客户端传递的 api_key 作为 Z.AI 认证 token |
 
 #### 提供商配置
 | 变量名                    | 默认值    | 说明                        |
@@ -238,6 +239,58 @@ LONGCAT_TOKENS_FILE=longcat_tokens.txt
 - **智能去重**：自动检测和去除重复token
 - **类型验证**：只接受认证用户token (role: "user")，拒绝匿名token (role: "guest")
 - **回退机制**：认证模式失败时自动回退到匿名模式，*匿名模式无法回退到认证模式*
+
+## 🆕 动态 API Key 模式
+
+### 功能说明
+
+动态 API Key 模式允许客户端直接传递 Z.AI 认证 token，而不需要预配置在服务器端。这种模式特别适合：
+
+- **多租户场景**：每个客户端使用自己的 Z.AI token
+- **开发测试**：快速测试不同的 token 而无需修改服务器配置
+- **token 轮换**：客户端可以动态更新 token 而不重启服务
+
+### 配置方式
+
+```bash
+# 启用动态 API Key 模式
+USE_CLIENT_TOKEN=true
+
+# 跳过客户端认证（可选）
+SKIP_AUTH_TOKEN=true
+
+# 关闭匿名模式（强制使用认证 token）
+ANONYMOUS_MODE=false
+```
+
+### 使用方式
+
+客户端在请求头中传递 Z.AI token：
+
+```bash
+curl -X POST "http://localhost:8080/v1/chat/completions" \
+  -H "Authorization: Bearer your-zai-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "GLM-4.5",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+```
+
+### Token 优先级
+
+当 `USE_CLIENT_TOKEN=true` 时，token 获取优先级为：
+
+1. **客户端传递的 token**（最高优先级）
+2. **Token 池中的 token**
+3. **预配置的 AUTH_TOKEN**
+4. **匿名访客 token**（仅当 ANONYMOUS_MODE=true）
+
+### 安全注意事项
+
+- ⚠️ 启用 `USE_CLIENT_TOKEN` 时，建议同时启用 `SKIP_AUTH_TOKEN=false` 以确保客户端认证
+- ⚠️ 客户端传递的 token 不会被存储到 token 池中，仅单次请求有效
+- ⚠️ 建议在受信任的网络环境中使用此功能
 
 ## 监控API
 
