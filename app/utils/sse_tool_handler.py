@@ -262,7 +262,7 @@ class SSEToolHandler:
         if not delta_content:
             return
 
-        logger.info(f"📝 工具处理器收到答案内容: {delta_content[:50]}...")
+        logger.debug(f"📝 工具处理器收到答案内容: {delta_content[:50]}...")
 
         # 添加到缓冲区
         self.content_buffer += delta_content
@@ -287,12 +287,12 @@ class SSEToolHandler:
         if not self.content_buffer:
             return
 
-        logger.info(f"💬 工具处理器刷新缓冲区: {self.buffer_size} 字符 - {self.content_buffer[:50]}...")
+        logger.debug(f"💬 工具处理器刷新缓冲区: {self.buffer_size} 字符 - {self.content_buffer[:50]}...")
 
         if self.stream:
             chunk = self._create_content_chunk(self.content_buffer)
             output_data = f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-            logger.info(f"➡️ 工具处理器输出: {output_data[:100]}...")
+            logger.debug(f"➡️ 工具处理器输出: {output_data[:100]}...")
             yield output_data
 
         # 清空缓冲区

@@ -25,58 +25,6 @@ from app.utils.sse_tool_handler import SSEToolHandler
 
 logger = get_logger()
 
-
-def _urlsafe_b64decode(data: str) -> bytes:
-    """Decode a URL-safe base64 string with proper padding."""
-    if isinstance(data, str):
-        data_bytes = data.encode("utf-8")
-    else:
-        data_bytes = data
-    padding = b"=" * (-len(data_bytes) % 4)
-    return base64.urlsafe_b64decode(data_bytes + padding)
-
-
-def _decode_jwt_payload(token: str) -> Dict[str, Any]:
-    """Decode JWT payload without verification to extract metadata."""
-    try:
-        parts = token.split(".")
-        if len(parts) < 2:
-            return {}
-        payload_raw = _urlsafe_b64decode(parts[1])
-        return json.loads(payload_raw.decode("utf-8", errors="ignore"))
-    except Exception:
-        return {}
-
-
-def _extract_user_id_from_token(token: str) -> str:
-    """Extract user_id from a JWT's payload. Fallback to 'guest'."""
-    payload = _decode_jwt_payload(token) if token else {}
-    for key in ("id", "user_id", "uid", "sub"):
-        val = payload.get(key)
-        if isinstance(val, (str, int)) and str(val):
-            return str(val)
-    return "guest"
-
-
-def generate_signature(message_text: str, request_id: str, timestamp_ms: int, user_id: str, secret: str = "junjie") -> str:
-    """Dual-layer HMAC-SHA256 signature.
-
-    Layer1: derived key = HMAC(secret, window_index)
-    Layer2: signature = HMAC(derived_key, canonical_string)
-    canonical_string = "requestId,<id>,timestamp,<ts>,user_id,<uid>|<msg>|<ts>"
-    """
-    r = str(timestamp_ms)
-    e = f"requestId,{request_id},timestamp,{timestamp_ms},user_id,{user_id}"
-    t = message_text or ""
-    i = f"{e}|{t}|{r}"
-
-    window_index = timestamp_ms // (5 * 60 * 1000)
-    root_key = (secret or "junjie").encode("utf-8")
-    derived_hex = hmac.new(root_key, str(window_index).encode("utf-8"), hashlib.sha256).hexdigest()
-    signature = hmac.new(derived_hex.encode("utf-8"), i.encode("utf-8"), hashlib.sha256).hexdigest()
-    return signature
-
-
 class ZAIProvider(BaseProvider):
     """Z.AI 提供商"""
 
@@ -461,17 +409,17 @@ class ZAIProvider(BaseProvider):
         request: OpenAIRequest,
         transformed: Dict[str, Any]
     ) -> AsyncGenerator[str, None]:
-        """创建带重试机制的流式响应生成器"""
-        current_transformed = transformed
-        current_token = current_transformed.get("token", "")
+        """流式响应生成器"""
+        current_token = transformed.get("token", "")
 
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 # 发送请求到上游
-                self.logger.info(f"🎯 发送请求到 Z.AI: {transformed['url']}")
+                self.logger.info(f"🎯 发送请求到 Z.AI: {transformed['url']} with params {transformed.get('params', {})}")
                 async with client.stream(
                     "POST",
                     transformed["url"],
+                    params=transformed.get("params", {}),
                     json=transformed["body"],
                     headers=transformed["headers"],
                 ) as response:
@@ -503,7 +451,7 @@ class ZAIProvider(BaseProvider):
                     # 处理流式响应
                     chat_id = transformed["chat_id"]
                     model = transformed["model"]
-                    async for chunk in self._handle_stream_response(response, chat_id, model, request, current_transformed):
+                    async for chunk in self._handle_stream_response(response, chat_id, model, transformed):
                         yield chunk
                     return
 
@@ -549,7 +497,7 @@ class ZAIProvider(BaseProvider):
                 return self._streaming_error_generator(error_msg, "upstream_error", response.status_code)
 
         if request.stream:
-            return self._handle_stream_response(response, chat_id, model, request, transformed)
+            return self._handle_stream_response(response, chat_id, model, transformed)
         else:
             return await self._handle_non_stream_response(response, chat_id, model)
 
@@ -558,7 +506,6 @@ class ZAIProvider(BaseProvider):
         response: httpx.Response,
         chat_id: str,
         model: str,
-        request: OpenAIRequest,
         transformed: Dict[str, Any]
     ) -> AsyncGenerator[str, None]:
         """处理Z.AI流式响应"""
@@ -624,12 +571,13 @@ class ZAIProvider(BaseProvider):
                                     delta_content = data.get("delta_content", "")
                                     if delta_content:
                                         # 处理思考内容格式
-                                        if delta_content.startswith("<details"):
-                                            content = (
-                                                delta_content.split("</summary>\n>")[-1].strip()
-                                                if "</summary>\n>" in delta_content
-                                                else delta_content
-                                            )
+                                        content = (
+                                            delta_content.split("</summary>\n>")[-1].strip()
+                                            if delta_content.startswith("<details")
+                                            and "</summary>\n>" in delta_content
+                                            else delta_content
+                                        )
+
                                         thinking_chunk = self.create_openai_chunk(
                                             chat_id,
                                             model,
