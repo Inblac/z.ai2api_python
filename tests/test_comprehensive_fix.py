@@ -246,8 +246,7 @@ async def main():
     print("📋 当前配置:")
     print(f"  - 匿名模式: {settings.ANONYMOUS_MODE}")
     print(f"  - 工具支持: {settings.TOOL_SUPPORT}")
-    print(f"  - 最大重试: {settings.MAX_RETRIES}")
-    print(f"  - 重试延迟: {settings.RETRY_DELAY}s")
+    # Retry settings removed
     print()
     
     tests = [

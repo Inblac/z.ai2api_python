@@ -185,10 +185,6 @@ class Settings(BaseSettings):
     LONGCAT_PASSPORT_TOKEN: Optional[str] = os.getenv("LONGCAT_PASSPORT_TOKEN")
     LONGCAT_TOKENS_FILE: Optional[str] = os.getenv("LONGCAT_TOKENS_FILE")
 
-    # Retry Configuration
-    MAX_RETRIES: int = int(os.getenv("MAX_RETRIES", "5"))
-    RETRY_DELAY: float = float(os.getenv("RETRY_DELAY", "1.0"))  # 初始重试延迟（秒）
-
     # Browser Headers
     CLIENT_HEADERS: Dict[str, str] = {
         "Content-Type": "application/json",
