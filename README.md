@@ -3,6 +3,7 @@
 ![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python: 3.9-3.12](https://img.shields.io/badge/python-3.9--3.12-green.svg)
 ![FastAPI](https://img.shields.io/badge/framework-FastAPI-009688.svg)
+[![Build and Push Docker Image](https://github.com/Inblac/z.ai2api_python/actions/workflows/docker.yml/badge.svg)](https://github.com/Inblac/z.ai2api_python/actions/workflows/docker.yml)
 
 基于 FastAPI 的高性能 OpenAI API 兼容代理服务，采用多提供商架构设计，支持 GLM-4.5 系列、K2Think、LongCat 等多种 AI 模型的完整功能。
 
