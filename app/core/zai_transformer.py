@@ -58,8 +58,13 @@ def get_zai_dynamic_headers(chat_id: str = "") -> Dict[str, str]:
 
     # Z.AI 特定的 headers
     headers = {
+        # Core content negotiation
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
+        # Connection/perf hints to reduce handshake overhead
+        "Connection": "keep-alive",
+        "Cache-Control": "no-cache",
+        # UA and app-specific headers
         "User-Agent": user_agent,
         "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         "X-FE-Version": "prod-fe-1.0.79",

@@ -85,8 +85,8 @@ temp/
 .env
 .env.local
 .env.*.local
-tokens.txt
-!tokens.txt.example
+*tokens.txt
+!*tokens.txt.example
 
 # Docker相关
 Dockerfile*

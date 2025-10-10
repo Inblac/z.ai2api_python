@@ -413,9 +413,11 @@ class ZAIProvider(BaseProvider):
         current_token = transformed.get("token", "")
 
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                # 发送请求到上游
-                self.logger.info(f"🎯 发送请求到 Z.AI: {transformed['url']} with params {transformed.get('params', {})}")
+            async with httpx.AsyncClient(
+                timeout=60.0,
+                http2=True,
+            ) as client:
+                self.logger.info(f"🎯 发送请求到 Z.AI: {transformed['url']}")
                 async with client.stream(
                     "POST",
                     transformed["url"],
@@ -513,6 +515,17 @@ class ZAIProvider(BaseProvider):
 
         has_tools = transformed["body"].get("tools") is not None
         tool_handler = None
+        # Early ack: send an assistant role chunk immediately so the client sees progress
+        try:
+            role_chunk = self.create_openai_chunk(
+                chat_id,
+                model,
+                {"role": "assistant"}
+            )
+            yield await self.format_sse_chunk(role_chunk)
+        except Exception:
+            pass
+
         if has_tools:
             tool_handler = SSEToolHandler(model, stream=True)
             self.logger.info(f"🔧 初始化工具处理器: {len(transformed['body'].get('tools', []))} 个工具")
