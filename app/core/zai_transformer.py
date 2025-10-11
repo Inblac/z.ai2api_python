@@ -42,6 +42,7 @@ def get_zai_dynamic_headers(chat_id: str = "") -> Dict[str, str]:
     if "Chrome/" in user_agent:
         try:
             chrome_version = user_agent.split("Chrome/")[1].split(".")[0]
+            sec_ch_ua = f'"Google Chrome";v="{chrome_version}", "Not_A_Brand";v="8", "Chromium";v="{chrome_version}"'
         except:
             pass
 
@@ -66,8 +67,8 @@ def get_zai_dynamic_headers(chat_id: str = "") -> Dict[str, str]:
         "Cache-Control": "no-cache",
         # UA and app-specific headers
         "User-Agent": user_agent,
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "X-FE-Version": "prod-fe-1.0.79",
+        "Accept-Language": "zh-CN",
+        "X-FE-Version": "prod-fe-1.0.97",
         "Origin": "https://chat.z.ai",
     }
 
