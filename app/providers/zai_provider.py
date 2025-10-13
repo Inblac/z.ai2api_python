@@ -143,13 +143,20 @@ class ZAIProvider(BaseProvider):
             chat_id = str(uuid.uuid4())
 
             # 3. 构造签名
-            safe_user_message = user_message or ""
-            e = f"requestId,{request_id},timestamp,{timestamp},user_id,{user_id}"
-            i = f"{e}|{safe_user_message}|{str(timestamp)}"
-            n = timestamp // (5 * 60 * 1000)
+            # 签名1：时间及key
+            time_5min_split = timestamp // (5 * 60 * 1000)
             key = "junjie".encode('utf-8')
-            o = hmac.new(key, str(n).encode('utf-8'), hashlib.sha256).hexdigest()
-            signature = hmac.new(o.encode('utf-8'), i.encode('utf-8'), hashlib.sha256).hexdigest()
+            signature_pre = hmac.new(key, str(time_5min_split).encode('utf-8'), hashlib.sha256).hexdigest()
+            # 签名2：对消息签名
+            # 用户最后一条消息
+            safe_user_message = user_message or ""
+            # 带请求信息的拼接字段
+            request_info = f"requestId,{request_id},timestamp,{timestamp},user_id,{user_id}"
+            # 用户消息的Base64编码
+            user_message_encode = base64.b64encode(safe_user_message.encode('utf-8')).decode('utf-8')
+            # 完整签名字符串
+            sign_str = f"{request_info}|{user_message_encode}|{str(timestamp)}"
+            signature = hmac.new(signature_pre.encode('utf-8'), sign_str.encode('utf-8'), hashlib.sha256).hexdigest()
 
             return {
                 "user_id": user_id,
