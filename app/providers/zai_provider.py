@@ -169,6 +169,72 @@ class ZAIProvider(BaseProvider):
             self.logger.error(f"生成签名参数时出错: {e}")
             return None
 
+    def _generate_browser_params(self, user_agent: str) -> Dict[str, Any]:
+        """生成浏览器环境参数"""
+        # 解析浏览器信息
+        browser_name = "Chrome"
+        os_name = "Windows"
+        
+        if "Chrome/" in user_agent:
+            browser_name = "Chrome"
+        elif "Edg/" in user_agent:
+            browser_name = "Edge"
+        elif "Firefox/" in user_agent:
+            browser_name = "Firefox"
+        elif "Safari/" in user_agent:
+            browser_name = "Safari"
+        
+        if "Windows" in user_agent:
+            os_name = "Windows"
+        elif "Mac" in user_agent:
+            os_name = "macOS"
+        elif "Linux" in user_agent:
+            os_name = "Linux"
+        
+        now = datetime.now()
+        
+        return {
+            # 语言和时区（固定）
+            "language": "zh-CN",
+            "languages": "zh-CN,en-US",
+            "timezone": "Asia/Shanghai",
+            "timezone_offset": -480,
+            
+            # 时间（动态）
+            "local_time": now.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+            "utc_time": datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT"),
+            
+            # 浏览器环境（固定值，模拟常见环境）
+            # "cookie_enabled": "true",
+            # "screen_width": "2560",
+            # "screen_height": "1440",
+            # "screen_resolution": "2560x1440",
+            # "viewport_height": "1271",
+            # "viewport_width": "1107",
+            # "viewport_size": "1107x1271",
+            # "color_depth": "24",
+            # "pixel_ratio": "1",
+            
+            # 设备检测（固定）
+            "is_mobile": "false",
+            "is_touch": "false",
+            "max_touch_points": "40",
+            
+            # 页面信息（固定）
+            "search": "",
+            "hash": "",
+            "host": "chat.z.ai",
+            "hostname": "chat.z.ai",
+            "protocol": "https:",
+            "referrer": "",
+            "title": "Z.ai Chat - Free AI powered by GLM-4.6 & GLM-4.5",
+            
+            # 浏览器信息（从UA解析）
+            "user-agent": user_agent,
+            "browser_name": browser_name,
+            "os_name": os_name,
+        }
+
     async def transform_request(self, request: OpenAIRequest) -> Dict[str, Any]:
         """转换OpenAI请求为Z.AI格式"""
         self.logger.info(f"🔄 转换 OpenAI 请求到 Z.AI 格式: {request.model}")
@@ -212,8 +278,17 @@ class ZAIProvider(BaseProvider):
         timestamp = signature_params["timestamp"]
         signature = signature_params["signature"]
 
-        # 4. 构建请求 URL 和 Params
+        # 4. 构建请求头
+        headers = get_zai_dynamic_headers(chat_id)
+        headers["Authorization"]= f"Bearer {token}"
+        headers["X-Signature"]= signature
+
+        # 5. 构建请求 URL 和 Params
         url = f"{self.base_url}/api/chat/completions"
+        
+        # 获取浏览器环境参数
+        browser_params = self._generate_browser_params(headers.get("User-Agent", ""))
+        
         params = {
             "timestamp": timestamp,
             "requestId": request_id,
@@ -222,12 +297,12 @@ class ZAIProvider(BaseProvider):
             "current_url": f"{self.base_url}/c/{chat_id}",
             "pathname": f"/c/{chat_id}",
             "signature_timestamp": timestamp,
+            # 固定部分
+            "version": "0.0.1",
+            "platform": "web",
+            # 添加浏览器环境参数
+            **browser_params
         }
-
-        # 5. 构建请求头
-        headers = get_zai_dynamic_headers(chat_id)
-        headers["Authorization"]= f"Bearer {token}"
-        headers["X-Signature"]= signature
 
         # 6. 处理消息格式
         messages = []
@@ -244,7 +319,8 @@ class ZAIProvider(BaseProvider):
 
         # 7. 确定模型特性和上游模型ID
         requested_model = request.model
-        is_thinking = "-thinking" in requested_model.casefold()
+        requested_thinking_enable = isinstance(request.thinking, dict) and request.thinking.get("type") == "enabled"
+        is_thinking = ("-thinking" in requested_model.casefold()) or requested_thinking_enable
         is_search = "-search" in requested_model.casefold()
 
         # 获取上游模型ID
@@ -263,6 +339,7 @@ class ZAIProvider(BaseProvider):
             "stream": True,  # 总是使用流式
             "model": upstream_model_id,
             "messages": messages,
+            "signature_prompt": user_message_content,
             "params": {},
             "features": {
                 "image_generation": False,
@@ -344,6 +421,10 @@ class ZAIProvider(BaseProvider):
         # 9. 返回转换后的请求对象
         # 存储当前token用于错误处理
         self._current_token = token
+        # 日志输出：格式化的json
+        self.logger.debug(f"转换后的请求头:\n {json.dumps(headers, ensure_ascii=False, indent=2)}")
+        self.logger.debug(f"转换后的请求参数:\n {json.dumps(params, ensure_ascii=False, indent=2)}")
+        self.logger.debug(f"转换后的请求体:\n {json.dumps(body, ensure_ascii=False, indent=2)}")
         return {
             "url": url,
             "params": params,

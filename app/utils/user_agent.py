@@ -18,7 +18,7 @@ def get_user_agent_instance() -> UserAgent:
     """获取或创建 UserAgent 实例（单例模式）"""
     global _user_agent_instance
     if _user_agent_instance is None:
-        _user_agent_instance = UserAgent()
+        _user_agent_instance = UserAgent(min_version=135)
     return _user_agent_instance
 
 
