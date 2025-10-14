@@ -28,23 +28,6 @@ def get_provider_router_instance():
     return provider_router
 
 
-def create_chunk(chat_id: str, model: str, delta: Dict[str, Any], finish_reason: Optional[str] = None) -> Dict[str, Any]:
-    """创建标准的 OpenAI chunk 结构"""
-    return {
-        "choices": [{
-            "delta": delta,
-            "finish_reason": finish_reason,
-            "index": 0,
-            "logprobs": None,
-        }],
-        "created": int(time.time()),
-        "id": chat_id,
-        "model": model,
-        "object": "chat.completion.chunk",
-        "system_fingerprint": "fp_zai_001",
-    }
-
-
 async def handle_non_stream_response(stream_response, request: OpenAIRequest) -> JSONResponse:
     """处理非流式响应"""
     logger.info("📄 开始处理非流式响应")

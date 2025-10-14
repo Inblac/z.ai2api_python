@@ -12,6 +12,7 @@ import hmac
 import hashlib
 import base64
 import httpx
+import random
 from datetime import datetime
 from typing import Dict, List, Any, Optional, AsyncGenerator, Union
 
@@ -20,20 +21,87 @@ from app.models.schemas import OpenAIRequest
 from app.core.config import settings
 from app.utils.logger import get_logger
 from app.utils.token_pool import get_token_pool
-from app.core.zai_transformer import generate_uuid, get_zai_dynamic_headers
+from app.utils.user_agent import get_random_user_agent
 from app.utils.sse_tool_handler import SSEToolHandler
 
 logger = get_logger()
+
+
+def get_zai_dynamic_headers(chat_id: str = "") -> Dict[str, str]:
+    """
+    生成 Z.AI 特定的动态浏览器 headers，包含随机 User-Agent
+    使用通用的 UserAgent 工具，但添加 Z.AI 特定的业务逻辑
+
+    Args:
+        chat_id: 聊天 ID，用于生成正确的 Referer
+
+    Returns:
+        Dict[str, str]: 包含 Z.AI 特定配置的 headers
+    """
+    # 随机选择浏览器类型，偏向Chrome和Edge
+    browser_choices = ["chrome", "chrome", "chrome", "edge", "edge", "firefox", "safari"]
+    browser_type = random.choice(browser_choices)
+
+    user_agent = get_random_user_agent(browser_type)
+
+    # 提取版本信息
+    chrome_version = "139"
+    edge_version = "139"
+
+    if "Chrome/" in user_agent:
+        try:
+            chrome_version = user_agent.split("Chrome/")[1].split(".")[0]
+            sec_ch_ua = f'"Google Chrome";v="{chrome_version}", "Not?A_Brand";v="8", "Chromium";v="{chrome_version}"'
+        except:
+            pass
+
+    if "Edg/" in user_agent:
+        try:
+            edge_version = user_agent.split("Edg/")[1].split(".")[0]
+            sec_ch_ua = f'"Microsoft Edge";v="{edge_version}", "Chromium";v="{chrome_version}", "Not_A Brand";v="24"'
+        except:
+            sec_ch_ua = f'"Not_A Brand";v="8", "Chromium";v="{chrome_version}", "Google Chrome";v="{chrome_version}"'
+    elif "Firefox/" in user_agent:
+        sec_ch_ua = None  # Firefox不使用sec-ch-ua
+    else:
+        sec_ch_ua = f'"Not_A Brand";v="8", "Chromium";v="{chrome_version}", "Google Chrome";v="{chrome_version}"'
+
+    # Z.AI 特定的 headers
+    headers = {
+        # Core content negotiation
+        "Content-Type": "application/json",
+        "Accept": "*/*",
+        # Connection/perf hints to reduce handshake overhead
+        "Connection": "keep-alive",
+        "Cache-Control": "no-cache",
+        # UA and app-specific headers
+        "User-Agent": user_agent,
+        "Accept-Language": "zh-CN",
+        "X-FE-Version": "prod-fe-1.0.98",
+        "Origin": "https://chat.z.ai",
+    }
+
+    # 添加浏览器特定的 sec-ch-ua headers
+    if sec_ch_ua:
+        headers["sec-ch-ua"] = sec_ch_ua
+        headers["sec-ch-ua-mobile"] = "?0"
+        headers["sec-ch-ua-platform"] = '"Windows"'
+
+    # 根据 chat_id 设置 Referer
+    if chat_id:
+        headers["Referer"] = f"https://chat.z.ai/c/{chat_id}"
+    else:
+        headers["Referer"] = "https://chat.z.ai/"
+
+    return headers
+
 
 class ZAIProvider(BaseProvider):
     """Z.AI 提供商"""
 
     def __init__(self):
         config = ProviderConfig(
-            name="zai",
-            api_endpoint=settings.API_ENDPOINT,
-            timeout=30,
-            headers=get_zai_dynamic_headers()
+            name="zai", api_endpoint=settings.API_ENDPOINT, timeout=30, headers=get_zai_dynamic_headers()
         )
         super().__init__(config)
 
@@ -55,6 +123,10 @@ class ZAIProvider(BaseProvider):
             settings.GLM46_SEARCH_MODEL: "GLM-4-6-API-V1",  # GLM-4.6-Search
         }
 
+    def _generate_uuid(self) -> str:
+        """生成UUID v4"""
+        return str(uuid.uuid4())
+
     def get_supported_models(self) -> List[str]:
         """获取支持的模型列表"""
         return [
@@ -70,7 +142,7 @@ class ZAIProvider(BaseProvider):
     async def get_token(self) -> str:
         """获取认证令牌"""
         # 如果启用客户端 token 模式且有客户端 token，优先使用
-        if settings.USE_CLIENT_TOKEN and self._client_token and not settings.ANONYMOUS_MODE:
+        if settings.USE_CLIENT_TOKEN and self._client_token:
             self.logger.debug(f"使用客户端传递的 token: {self._client_token[:20]}...")
             return self._client_token
 
@@ -101,11 +173,6 @@ class ZAIProvider(BaseProvider):
                 self.logger.debug(f"从token池获取令牌: {token[:20]}...")
                 return token
 
-        # 如果token池为空或没有可用token，使用配置的AUTH_TOKEN
-        if settings.AUTH_TOKEN and settings.AUTH_TOKEN != "sk-your-api-key":
-            self.logger.debug("使用配置的AUTH_TOKEN")
-            return settings.AUTH_TOKEN
-
         self.logger.error("❌ 无法获取有效的认证令牌")
         return ""
 
@@ -113,7 +180,9 @@ class ZAIProvider(BaseProvider):
         """标记token使用失败"""
         token_pool = get_token_pool()
         if token_pool:
-            error_to_report = error if error is not None else Exception("Token failure reported without specific error")
+            error_to_report = (
+                error if error is not None else Exception("Token failure reported without specific error")
+            )
             token_pool.mark_token_failure(token, error_to_report)
 
     def _generate_signature_params(self, token: str, user_message: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -139,8 +208,8 @@ class ZAIProvider(BaseProvider):
 
             # 2. 生成签名所需参数
             timestamp = int(time.time() * 1000)
-            request_id = str(uuid.uuid4())
-            chat_id = str(uuid.uuid4())
+            request_id = self._generate_uuid()
+            chat_id = self._generate_uuid()
 
             # 3. 构造签名
             # 签名1：时间及key
@@ -174,7 +243,7 @@ class ZAIProvider(BaseProvider):
         # 解析浏览器信息
         browser_name = "Chrome"
         os_name = "Windows"
-        
+
         if "Chrome/" in user_agent:
             browser_name = "Chrome"
         elif "Edg/" in user_agent:
@@ -183,27 +252,25 @@ class ZAIProvider(BaseProvider):
             browser_name = "Firefox"
         elif "Safari/" in user_agent:
             browser_name = "Safari"
-        
+
         if "Windows" in user_agent:
             os_name = "Windows"
         elif "Mac" in user_agent:
             os_name = "macOS"
         elif "Linux" in user_agent:
             os_name = "Linux"
-        
+
         now = datetime.now()
-        
+
         return {
             # 语言和时区（固定）
             "language": "zh-CN",
             "languages": "zh-CN,en-US",
             "timezone": "Asia/Shanghai",
             "timezone_offset": -480,
-            
             # 时间（动态）
             "local_time": now.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
             "utc_time": datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT"),
-            
             # 浏览器环境（固定值，模拟常见环境）
             # "cookie_enabled": "true",
             # "screen_width": "2560",
@@ -214,12 +281,10 @@ class ZAIProvider(BaseProvider):
             # "viewport_size": "1107x1271",
             # "color_depth": "24",
             # "pixel_ratio": "1",
-            
             # 设备检测（固定）
             "is_mobile": "false",
             "is_touch": "false",
             "max_touch_points": "40",
-            
             # 页面信息（固定）
             "search": "",
             "hash": "",
@@ -228,7 +293,6 @@ class ZAIProvider(BaseProvider):
             "protocol": "https:",
             "referrer": "",
             "title": "Z.ai Chat - Free AI powered by GLM-4.6 & GLM-4.5",
-            
             # 浏览器信息（从UA解析）
             "user-agent": user_agent,
             "browser_name": browser_name,
@@ -244,8 +308,13 @@ class ZAIProvider(BaseProvider):
         if not token:
             self.logger.error("❌ 无法获取认证令牌，请求将失败")
             return {
-                "url": self.config.api_endpoint, "params": {}, "headers": {}, "body": {}, "token": None,
-                "chat_id": "no-chat-id", "model": request.model
+                "url": self.config.api_endpoint,
+                "params": {},
+                "headers": {},
+                "body": {},
+                "token": None,
+                "chat_id": "no-chat-id",
+                "model": request.model,
             }
         self._current_token = token
 
@@ -268,8 +337,13 @@ class ZAIProvider(BaseProvider):
         if not signature_params:
             self.logger.error("❌ 生成签名失败，请求将失败")
             return {
-                "url": self.config.api_endpoint, "params": {}, "headers": {}, "body": {}, "token": token,
-                "chat_id": "no-chat-id", "model": request.model
+                "url": self.config.api_endpoint,
+                "params": {},
+                "headers": {},
+                "body": {},
+                "token": token,
+                "chat_id": "no-chat-id",
+                "model": request.model,
             }
 
         user_id = signature_params["user_id"]
@@ -280,15 +354,15 @@ class ZAIProvider(BaseProvider):
 
         # 4. 构建请求头
         headers = get_zai_dynamic_headers(chat_id)
-        headers["Authorization"]= f"Bearer {token}"
-        headers["X-Signature"]= signature
+        headers["Authorization"] = f"Bearer {token}"
+        headers["X-Signature"] = signature
 
         # 5. 构建请求 URL 和 Params
         url = f"{self.base_url}/api/chat/completions"
-        
+
         # 获取浏览器环境参数
         browser_params = self._generate_browser_params(headers.get("User-Agent", ""))
-        
+
         params = {
             "timestamp": timestamp,
             "requestId": request_id,
@@ -301,7 +375,7 @@ class ZAIProvider(BaseProvider):
             "version": "0.0.1",
             "platform": "web",
             # 添加浏览器环境参数
-            **browser_params
+            **browser_params,
         }
 
         # 6. 处理消息格式
@@ -333,7 +407,7 @@ class ZAIProvider(BaseProvider):
             self.logger.info("🔍 检测到搜索模型，添加 deep-web-search MCP 服务器")
 
         # 9. 构建上游请求体
-        chat_id = generate_uuid()
+        chat_id = self._generate_uuid()
 
         body = {
             "stream": True,  # 总是使用流式
@@ -348,36 +422,12 @@ class ZAIProvider(BaseProvider):
                 "preview_mode": False,
                 "flags": [],
                 "features": [
-                    {
-                        "type": "mcp",
-                        "server": "vibe-coding",
-                        "status": "hidden"
-                    },
-                    {
-                        "type": "mcp",
-                        "server": "ppt-maker",
-                        "status": "hidden"
-                    },
-                    {
-                        "type": "mcp",
-                        "server": "image-search",
-                        "status": "hidden"
-                    },
-                    {
-                        "type": "mcp",
-                        "server": "deep-research",
-                        "status": "hidden"
-                    },
-                    {
-                        "type": "tool_selector",
-                        "server": "tool_selector",
-                        "status": "hidden"
-                    },
-                    {
-                        "type": "mcp",
-                        "server": "advanced-search",
-                        "status": "hidden"
-                    }
+                    {"type": "mcp", "server": "vibe-coding", "status": "hidden"},
+                    {"type": "mcp", "server": "ppt-maker", "status": "hidden"},
+                    {"type": "mcp", "server": "image-search", "status": "hidden"},
+                    {"type": "mcp", "server": "deep-research", "status": "hidden"},
+                    {"type": "tool_selector", "server": "tool_selector", "status": "hidden"},
+                    {"type": "mcp", "server": "advanced-search", "status": "hidden"},
                 ],
                 "enable_thinking": is_thinking,
             },
@@ -396,13 +446,9 @@ class ZAIProvider(BaseProvider):
                 "{{CURRENT_TIMEZONE}}": "Asia/Shanghai",
                 "{{USER_LANGUAGE}}": "zh-CN",
             },
-            "model_item": {
-                "id": upstream_model_id,
-                "name": requested_model,
-                "owned_by": "z.ai"
-            },
+            "model_item": {"id": upstream_model_id, "name": requested_model, "owned_by": "z.ai"},
             "chat_id": chat_id,
-            "id": generate_uuid(),
+            "id": self._generate_uuid(),
         }
 
         # 处理工具支持
@@ -432,11 +478,13 @@ class ZAIProvider(BaseProvider):
             "body": body,
             "token": token,
             "chat_id": chat_id,
-            "model": requested_model
+            "model": requested_model,
         }
 
     @staticmethod
-    async def _streaming_error_generator(error_msg: str, error_type: str, code: Optional[int] = None) -> AsyncGenerator[str, None]:
+    async def _streaming_error_generator(
+        error_msg: str, error_type: str, code: Optional[int] = None
+    ) -> AsyncGenerator[str, None]:
         """为流式响应生成一个标准的错误块。"""
         error_payload: Dict[str, Any] = {"message": error_msg, "type": error_type}
         if code is not None:
@@ -479,7 +527,7 @@ class ZAIProvider(BaseProvider):
                         transformed["url"],
                         params=transformed.get("params", {}),
                         headers=transformed["headers"],
-                        json=transformed["body"]
+                        json=transformed["body"],
                     )
                 # transform_response 知道如何处理上游的流并聚合成单个响应
                 return await self.transform_response(response, request, transformed)
@@ -493,9 +541,7 @@ class ZAIProvider(BaseProvider):
                 return self.handle_error(e, "请求处理")
 
     async def _create_stream_response(
-        self,
-        request: OpenAIRequest,
-        transformed: Dict[str, Any]
+        self, request: OpenAIRequest, transformed: Dict[str, Any]
     ) -> AsyncGenerator[str, None]:
         """流式响应生成器"""
         current_token = transformed.get("token", "")
@@ -525,7 +571,7 @@ class ZAIProvider(BaseProvider):
                             "error": {
                                 "message": f"Upstream error: {response.status_code}",
                                 "type": "upstream_error",
-                                "code": response.status_code
+                                "code": response.status_code,
                             }
                         }
                         yield f"data: {json.dumps(error_response)}\n\n"
@@ -548,6 +594,7 @@ class ZAIProvider(BaseProvider):
         except Exception as e:
             self.logger.error(f"❌ 流处理错误: {e}")
             import traceback
+
             self.logger.error(traceback.format_exc())
 
             # 标记token失败（如果不是匿名模式）
@@ -555,21 +602,13 @@ class ZAIProvider(BaseProvider):
                 self.mark_token_failure(current_token, e)
 
             # 返回错误
-            error_response = {
-                "error": {
-                    "message": str(e),
-                    "type": "stream_error"
-                }
-            }
+            error_response = {"error": {"message": str(e), "type": "stream_error"}}
             yield f"data: {json.dumps(error_response)}\n\n"
             yield "data: [DONE]\n\n"
             return
 
     async def transform_response(
-        self,
-        response: httpx.Response,
-        request: OpenAIRequest,
-        transformed: Dict[str, Any]
+        self, response: httpx.Response, request: OpenAIRequest, transformed: Dict[str, Any]
     ) -> Union[Dict[str, Any], AsyncGenerator[str, None]]:
         """转换Z.AI响应为OpenAI格式"""
         chat_id = transformed["chat_id"]
@@ -592,11 +631,7 @@ class ZAIProvider(BaseProvider):
             return await self._handle_non_stream_response(response, chat_id, model)
 
     async def _handle_stream_response(
-        self,
-        response: httpx.Response,
-        chat_id: str,
-        model: str,
-        transformed: Dict[str, Any]
+        self, response: httpx.Response, chat_id: str, model: str, transformed: Dict[str, Any]
     ) -> AsyncGenerator[str, None]:
         """处理Z.AI流式响应"""
         self.logger.info(f"✅ Z.AI 响应成功，开始处理 SSE 流")
@@ -605,11 +640,7 @@ class ZAIProvider(BaseProvider):
         tool_handler = None
         # Early ack: send an assistant role chunk immediately so the client sees progress
         try:
-            role_chunk = self.create_openai_chunk(
-                chat_id,
-                model,
-                {"role": "assistant"}
-            )
+            role_chunk = self.create_openai_chunk(chat_id, model, {"role": "assistant"})
             yield await self.format_sse_chunk(role_chunk)
         except Exception:
             pass
@@ -643,7 +674,11 @@ class ZAIProvider(BaseProvider):
                                 yield "data: [DONE]\n\n"
                             continue
 
-                        self.logger.debug(f"📦 解析数据块: {chunk_str[:1000]}..." if len(chunk_str) > 1000 else f"📦 解析数据块: {chunk_str}")
+                        self.logger.debug(
+                            f"📦 解析数据块: {chunk_str[:1000]}..."
+                            if len(chunk_str) > 1000
+                            else f"📦 解析数据块: {chunk_str}"
+                        )
 
                         try:
                             chunk = json.loads(chunk_str)
@@ -657,9 +692,11 @@ class ZAIProvider(BaseProvider):
 
                                 if tool_handler:
                                     sse_chunk = {
-                                        "phase": phase, "edit_content": data.get("edit_content", ""),
-                                        "delta_content": data.get("delta_content", ""), "edit_index": data.get("edit_index"),
-                                        "usage": data.get("usage", {})
+                                        "phase": phase,
+                                        "edit_content": data.get("edit_content", ""),
+                                        "delta_content": data.get("delta_content", ""),
+                                        "edit_index": data.get("edit_index"),
+                                        "usage": data.get("usage", {}),
                                     }
                                     for output in tool_handler.process_sse_chunk(sse_chunk):
                                         yield output
@@ -682,9 +719,7 @@ class ZAIProvider(BaseProvider):
                                         thinking_chunk = self.create_openai_chunk(
                                             chat_id,
                                             model,
-                                            {
-                                                "role": "assistant",
-                                                "reasoning_content": content.replace("\n>", "\n")},
+                                            {"role": "assistant", "reasoning_content": content.replace("\n>", "\n")},
                                         )
                                         yield await self.format_sse_chunk(thinking_chunk)
                                 elif phase == "answer":
@@ -694,26 +729,41 @@ class ZAIProvider(BaseProvider):
                                     if edit_content and "</details>\n" in edit_content:
                                         if has_thinking:
                                             thinking_signature = str(int(time.time() * 1000))
-                                            sig_chunk = self.create_openai_chunk(chat_id, model, {"role": "assistant", "thinking": {"content": "", "signature": thinking_signature}})
+                                            sig_chunk = self.create_openai_chunk(
+                                                chat_id,
+                                                model,
+                                                {
+                                                    "role": "assistant",
+                                                    "thinking": {"content": "", "signature": thinking_signature},
+                                                },
+                                            )
                                             yield await self.format_sse_chunk(sig_chunk)
 
                                         content_after = edit_content.split("</details>\n")[-1]
                                         if content_after:
-                                            content_chunk = self.create_openai_chunk(chat_id, model, {"role": "assistant", "content": content_after})
+                                            content_chunk = self.create_openai_chunk(
+                                                chat_id, model, {"role": "assistant", "content": content_after}
+                                            )
                                             yield await self.format_sse_chunk(content_chunk)
                                     elif delta_content:
                                         if not has_thinking:
-                                            has_thinking = True # Mark as true to prevent sending role chunk again
-                                            role_chunk = self.create_openai_chunk(chat_id, model, {"role": "assistant"})
+                                            has_thinking = True  # Mark as true to prevent sending role chunk again
+                                            role_chunk = self.create_openai_chunk(
+                                                chat_id, model, {"role": "assistant"}
+                                            )
                                             yield await self.format_sse_chunk(role_chunk)
 
-                                        content_chunk = self.create_openai_chunk(chat_id, model, {"role": "assistant", "content": delta_content})
+                                        content_chunk = self.create_openai_chunk(
+                                            chat_id, model, {"role": "assistant", "content": delta_content}
+                                        )
                                         yield await self.format_sse_chunk(content_chunk)
 
                                     if data.get("usage"):
                                         self.logger.info(f"📦 完成响应 - 使用统计: {json.dumps(data['usage'])}")
                                         if not tool_handler:
-                                            finish_chunk = self.create_openai_chunk(chat_id, model, {"role": "assistant", "content": ""}, "stop")
+                                            finish_chunk = self.create_openai_chunk(
+                                                chat_id, model, {"role": "assistant", "content": ""}, "stop"
+                                            )
                                             finish_chunk["usage"] = data["usage"]
                                             yield await self.format_sse_chunk(finish_chunk)
                                             yield "data: [DONE]\n\n"
@@ -731,16 +781,12 @@ class ZAIProvider(BaseProvider):
         except Exception as e:
             self.logger.error(f"❌ 流式响应处理错误: {e}")
             import traceback
+
             self.logger.error(traceback.format_exc())
             async for chunk in self._streaming_error_generator("流处理失败", "stream_error"):
                 yield chunk
 
-    async def _handle_non_stream_response(
-        self,
-        response: httpx.Response,
-        chat_id: str,
-        model: str
-    ) -> Dict[str, Any]:
+    async def _handle_non_stream_response(self, response: httpx.Response, chat_id: str, model: str) -> Dict[str, Any]:
         """处理非流式响应"""
         final_content = ""
         reasoning_content = ""
@@ -773,7 +819,11 @@ class ZAIProvider(BaseProvider):
 
                 if phase == "thinking":
                     if delta_content:
-                        cleaned = delta_content.split("</summary>\n>")[-1].strip() if delta_content.startswith("<details") and "</summary>\n>" in delta_content else delta_content
+                        cleaned = (
+                            delta_content.split("</summary>\n>")[-1].strip()
+                            if delta_content.startswith("<details") and "</summary>\n>" in delta_content
+                            else delta_content
+                        )
                         reasoning_content += cleaned
                 elif phase == "answer":
                     if edit_content and "</details>\n" in edit_content:
@@ -784,6 +834,7 @@ class ZAIProvider(BaseProvider):
         except Exception as e:
             self.logger.error(f"❌ 非流式响应处理错误: {e}")
             import traceback
+
             self.logger.error(traceback.format_exc())
             return self.handle_error(e, "非流式聚合")
 
@@ -792,6 +843,4 @@ class ZAIProvider(BaseProvider):
         if not final_content and reasoning_content:
             final_content = reasoning_content
 
-        return self.create_openai_response_with_reasoning(
-            chat_id, model, final_content, reasoning_content, usage_info
-        )
+        return self.create_openai_response_with_reasoning(chat_id, model, final_content, reasoning_content, usage_info)

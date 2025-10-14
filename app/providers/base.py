@@ -29,16 +29,6 @@ class ProviderConfig:
     extra_config: Optional[Dict[str, Any]] = None
 
 
-@dataclass
-class ProviderResponse:
-    """提供商响应"""
-    success: bool
-    content: str = ""
-    error: Optional[str] = None
-    usage: Optional[Dict[str, int]] = None
-    extra_data: Optional[Dict[str, Any]] = None
-
-
 class BaseProvider(ABC):
     """基础提供商抽象类"""
     

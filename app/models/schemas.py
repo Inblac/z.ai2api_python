@@ -34,32 +34,6 @@ class OpenAIRequest(BaseModel):
     thinking: Optional[Dict[str, Any]] = None
 
 
-class ModelItem(BaseModel):
-    """Model information item"""
-
-    id: str
-    name: str
-    owned_by: str
-
-
-class UpstreamRequest(BaseModel):
-    """Upstream service request model"""
-
-    stream: bool
-    model: str
-    messages: List[Message]
-    params: Dict[str, Any] = {}
-    features: Dict[str, Any] = {}
-    background_tasks: Optional[Dict[str, bool]] = None
-    chat_id: Optional[str] = None
-    id: Optional[str] = None
-    mcp_servers: Optional[List[str]] = None
-    model_item: Optional[Dict[str, Any]] = {}  # Model item dictionary
-    tools: Optional[List[Dict[str, Any]]] = None  # Add tools field for OpenAI compatibility
-    variables: Optional[Dict[str, str]] = None
-    model_config = {"protected_namespaces": ()}
-
-
 class Delta(BaseModel):
     """Stream delta model"""
 
@@ -95,39 +69,6 @@ class OpenAIResponse(BaseModel):
     model: str
     choices: List[Choice]
     usage: Optional[Usage] = None
-
-
-class UpstreamError(BaseModel):
-    """Upstream error model"""
-
-    detail: str
-    code: int
-
-
-class UpstreamDataInner(BaseModel):
-    """Inner upstream data model"""
-
-    error: Optional[UpstreamError] = None
-
-
-class UpstreamDataData(BaseModel):
-    """Upstream data content model"""
-
-    delta_content: str = ""
-    edit_content: str = ""
-    phase: str = ""
-    done: bool = False
-    usage: Optional[Usage] = None
-    error: Optional[UpstreamError] = None
-    inner: Optional[UpstreamDataInner] = None
-
-
-class UpstreamData(BaseModel):
-    """Upstream data model"""
-
-    type: str
-    data: UpstreamDataData
-    error: Optional[UpstreamError] = None
 
 
 class Model(BaseModel):
