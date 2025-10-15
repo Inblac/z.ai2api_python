@@ -393,9 +393,14 @@ class ZAIProvider(BaseProvider):
 
         # 7. 确定模型特性和上游模型ID
         requested_model = request.model
-        requested_thinking_enable = isinstance(request.thinking, dict) and request.thinking.get("type") == "enabled"
-        is_thinking = ("-thinking" in requested_model.casefold()) or requested_thinking_enable
         is_search = "-search" in requested_model.casefold()
+        # 判断思考模式，如果body中的messages中的content是list，就开启思考。
+        is_anthropic_messages = any(isinstance(msg.content, list) for msg in request.messages)
+        if is_anthropic_messages:
+            self.logger.info(f"content为List，开启思考： {is_anthropic_messages}")
+        # 正常判断，body中带thinking或者模型名带-thinking
+        requested_thinking_enable = isinstance(request.thinking, dict) and request.thinking.get("type") == "enabled"
+        is_thinking = is_anthropic_messages or requested_thinking_enable or ("-thinking" in requested_model.casefold())
 
         # 获取上游模型ID
         upstream_model_id = self.model_mapping.get(requested_model, "0727-360B-API")
