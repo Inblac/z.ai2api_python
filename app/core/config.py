@@ -185,6 +185,9 @@ class Settings(BaseSettings):
     LONGCAT_PASSPORT_TOKEN: Optional[str] = os.getenv("LONGCAT_PASSPORT_TOKEN")
     LONGCAT_TOKENS_FILE: Optional[str] = os.getenv("LONGCAT_TOKENS_FILE")
 
+    # Z.AI Signature Configuration
+    ZAI_SIGNATURE_KEY: str = os.getenv("ZAI_SIGNATURE_KEY", "junjie")
+
 
     class Config:
         env_file = ".env"

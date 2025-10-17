@@ -77,7 +77,7 @@ def get_zai_dynamic_headers(chat_id: str = "") -> Dict[str, str]:
         # UA and app-specific headers
         "User-Agent": user_agent,
         "Accept-Language": "zh-CN",
-        "X-FE-Version": "prod-fe-1.0.98",
+        "X-FE-Version": "prod-fe-1.0.103",
         "Origin": "https://chat.z.ai",
     }
 
@@ -214,7 +214,7 @@ class ZAIProvider(BaseProvider):
             # 3. 构造签名
             # 签名1：时间及key
             time_5min_split = timestamp // (5 * 60 * 1000)
-            key = "junjie".encode('utf-8')
+            key = settings.ZAI_SIGNATURE_KEY.encode('utf-8')
             signature_pre = hmac.new(key, str(time_5min_split).encode('utf-8'), hashlib.sha256).hexdigest()
             # 签名2：对消息签名
             # 用户最后一条消息
