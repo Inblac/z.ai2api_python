@@ -137,13 +137,13 @@ class Settings(BaseSettings):
         return []
 
     # Model Configuration
-    PRIMARY_MODEL: str = os.getenv("PRIMARY_MODEL", "GLM-4.5")
-    THINKING_MODEL: str = os.getenv("THINKING_MODEL", "GLM-4.5-Thinking")
-    SEARCH_MODEL: str = os.getenv("SEARCH_MODEL", "GLM-4.5-Search")
+    GLM45_MODEL: str = os.getenv("GLM45_MODEL", "GLM-4.5")
+    GLM45_THINKING_MODEL: str = os.getenv("GLM45_THINKING_MODEL", "GLM-4.5-Thinking")
+    GLM45_SEARCH_MODEL: str = os.getenv("GLM45_SEARCH_MODEL", "GLM-4.5-Search")
     AIR_MODEL: str = os.getenv("AIR_MODEL", "GLM-4.5-Air")
     GLM46_MODEL: str = os.getenv("GLM46_MODEL", "GLM-4.6")
-    GLM46_THINKING_MODEL: str = os.getenv("GLM46_THINKING_MODEL", "GLM-4.6-Thinking")
-    GLM46_SEARCH_MODEL: str = os.getenv("GLM46_SEARCH_MODEL", "GLM-4.6-Search")
+    GLM46_GLM45_THINKING_MODEL: str = os.getenv("GLM46_GLM45_THINKING_MODEL", "GLM-4.6-Thinking")
+    GLM46_GLM45_SEARCH_MODEL: str = os.getenv("GLM46_GLM45_SEARCH_MODEL", "GLM-4.6-Search")
 
 
 

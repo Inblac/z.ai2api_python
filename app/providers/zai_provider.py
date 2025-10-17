@@ -114,13 +114,13 @@ class ZAIProvider(BaseProvider):
 
         # 模型映射
         self.model_mapping = {
-            settings.PRIMARY_MODEL: "0727-360B-API",  # GLM-4.5
-            settings.THINKING_MODEL: "0727-360B-API",  # GLM-4.5-Thinking
-            settings.SEARCH_MODEL: "0727-360B-API",  # GLM-4.5-Search
+            settings.GLM45_MODEL: "0727-360B-API",  # GLM-4.5
+            settings.GLM45_THINKING_MODEL: "0727-360B-API",  # GLM-4.5-Thinking
+            settings.GLM45_SEARCH_MODEL: "0727-360B-API",  # GLM-4.5-Search
             settings.AIR_MODEL: "0727-106B-API",  # GLM-4.5-Air
             settings.GLM46_MODEL: "GLM-4-6-API-V1",  # GLM-4.6
-            settings.GLM46_THINKING_MODEL: "GLM-4-6-API-V1",  # GLM-4.6-Thinking
-            settings.GLM46_SEARCH_MODEL: "GLM-4-6-API-V1",  # GLM-4.6-Search
+            settings.GLM46_GLM45_THINKING_MODEL: "GLM-4-6-API-V1",  # GLM-4.6-Thinking
+            settings.GLM46_GLM45_SEARCH_MODEL: "GLM-4-6-API-V1",  # GLM-4.6-Search
         }
 
     def _generate_uuid(self) -> str:
@@ -130,13 +130,13 @@ class ZAIProvider(BaseProvider):
     def get_supported_models(self) -> List[str]:
         """获取支持的模型列表"""
         return [
-            settings.PRIMARY_MODEL,
-            settings.THINKING_MODEL,
-            settings.SEARCH_MODEL,
+            settings.GLM45_MODEL,
+            settings.GLM45_THINKING_MODEL,
+            settings.GLM45_SEARCH_MODEL,
             settings.AIR_MODEL,
             settings.GLM46_MODEL,
-            settings.GLM46_THINKING_MODEL,
-            settings.GLM46_SEARCH_MODEL,
+            settings.GLM46_GLM45_THINKING_MODEL,
+            settings.GLM46_GLM45_SEARCH_MODEL,
         ]
 
     async def get_token(self) -> str:
@@ -266,21 +266,21 @@ class ZAIProvider(BaseProvider):
             # 语言和时区（固定）
             "language": "zh-CN",
             "languages": "zh-CN,en-US",
-            "timezone": "Asia/Shanghai",
-            "timezone_offset": -480,
+            # "timezone": "Asia/Shanghai",
+            # "timezone_offset": -480,
             # 时间（动态）
             "local_time": now.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
             "utc_time": datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT"),
             # 浏览器环境（固定值，模拟常见环境）
-            # "cookie_enabled": "true",
-            # "screen_width": "2560",
-            # "screen_height": "1440",
-            # "screen_resolution": "2560x1440",
-            # "viewport_height": "1271",
-            # "viewport_width": "1107",
-            # "viewport_size": "1107x1271",
-            # "color_depth": "24",
-            # "pixel_ratio": "1",
+            "cookie_enabled": "true",
+            "screen_width": "1920",
+            "screen_height": "1080",
+            "screen_resolution": "1920x1080",
+            "viewport_width": "1920",
+            "viewport_height": "869",
+            "viewport_size": "1920x869",
+            "color_depth": "32",
+            "pixel_ratio": "1",
             # 设备检测（固定）
             "is_mobile": "false",
             "is_touch": "false",

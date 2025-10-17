@@ -88,9 +88,9 @@ async def list_models():
         current_time = int(time.time())
         fallback_response = ModelsResponse(
             data=[
-                Model(id=settings.PRIMARY_MODEL, created=current_time, owned_by="z.ai"),
-                Model(id=settings.THINKING_MODEL, created=current_time, owned_by="z.ai"),
-                Model(id=settings.SEARCH_MODEL, created=current_time, owned_by="z.ai"),
+                Model(id=settings.GLM45_MODEL, created=current_time, owned_by="z.ai"),
+                Model(id=settings.GLM45_THINKING_MODEL, created=current_time, owned_by="z.ai"),
+                Model(id=settings.GLM45_SEARCH_MODEL, created=current_time, owned_by="z.ai"),
                 Model(id=settings.AIR_MODEL, created=current_time, owned_by="z.ai"),
             ]
         )
