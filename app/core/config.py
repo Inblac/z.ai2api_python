@@ -187,6 +187,9 @@ class Settings(BaseSettings):
 
     # Z.AI Signature Configuration
     ZAI_SIGNATURE_KEY: str = os.getenv("ZAI_SIGNATURE_KEY", "junjie")
+    
+    # X-FE-Version Header
+    X_FE_VERSION: str = os.getenv("X_FE_VERSION", "prod-fe-1.0.106")
 
 
     class Config:
