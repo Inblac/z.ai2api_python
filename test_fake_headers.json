@@ -1,0 +1,40 @@
+{
+  "stream": true,
+  "model": "GLM-4-6-API-V1",
+  "messages": [{ "role": "user", "content": "你好\n" }],
+  "signature_prompt": "你好\n",
+  "params": {
+    "temperature": 1.0
+  },
+  "features": {
+    "image_generation": false,
+    "web_search": false,
+    "auto_web_search": false,
+    "preview_mode": false,
+    "flags": [],
+    "enable_thinking": true
+  },
+  "background_tasks": {
+    "title_generation": false,
+    "tags_generation": false
+  },
+  "mcp_servers": [],
+  "variables": {
+    "{{USER_NAME}}": "Guest",
+    "{{USER_LOCATION}}": "Unknown",
+    "{{CURRENT_DATETIME}}": "2025-11-17 11:16:14",
+    "{{CURRENT_DATE}}": "2025-11-17",
+    "{{CURRENT_TIME}}": "11:16:14",
+    "{{CURRENT_WEEKDAY}}": "Monday",
+    "{{CURRENT_TIMEZONE}}": "Asia/Shanghai",
+    "{{USER_LANGUAGE}}": "zh-CN"
+  },
+  "model_item": {
+    "id": "GLM-4-6-API-V1",
+    "name": "GLM-4.6",
+    "owned_by": "z.ai"
+  },
+  "chat_id": "b2a01475-79b0-4f9b-836a-0f5234caa8ca",
+  "id": "fe3e1faf-2f35-47bf-ac54-c462919887c3",
+  "tools": null
+}

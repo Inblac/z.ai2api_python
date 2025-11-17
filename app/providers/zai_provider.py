@@ -358,7 +358,7 @@ class ZAIProvider(BaseProvider):
         headers["X-Signature"] = signature
 
         # 5. 构建请求 URL 和 Params
-        url = f"{self.base_url}/api/chat/completions"
+        url = f"{self.base_url}/api/v2/chat/completions"
 
         # 获取浏览器环境参数
         browser_params = self._generate_browser_params(headers.get("User-Agent", ""))
@@ -424,16 +424,16 @@ class ZAIProvider(BaseProvider):
                 "image_generation": False,
                 "web_search": is_search,
                 "auto_web_search": is_search,
-                "preview_mode": False,
+                "preview_mode": True,
                 "flags": [],
-                "features": [
-                    {"type": "mcp", "server": "vibe-coding", "status": "hidden"},
-                    {"type": "mcp", "server": "ppt-maker", "status": "hidden"},
-                    {"type": "mcp", "server": "image-search", "status": "hidden"},
-                    {"type": "mcp", "server": "deep-research", "status": "hidden"},
-                    {"type": "tool_selector", "server": "tool_selector", "status": "hidden"},
-                    {"type": "mcp", "server": "advanced-search", "status": "hidden"},
-                ],
+                # "features": [
+                #     {"type": "mcp", "server": "vibe-coding", "status": "hidden"},
+                #     {"type": "mcp", "server": "ppt-maker", "status": "hidden"},
+                #     {"type": "mcp", "server": "image-search", "status": "hidden"},
+                #     {"type": "mcp", "server": "deep-research", "status": "hidden"},
+                #     {"type": "tool_selector", "server": "tool_selector", "status": "hidden"},
+                #     {"type": "mcp", "server": "advanced-search", "status": "hidden"},
+                # ],
                 "enable_thinking": is_thinking,
             },
             "background_tasks": {
@@ -454,6 +454,8 @@ class ZAIProvider(BaseProvider):
             "model_item": {"id": upstream_model_id, "name": requested_model, "owned_by": "z.ai"},
             "chat_id": chat_id,
             "id": self._generate_uuid(),
+            "current_user_message_id": self._generate_uuid(),
+            "current_user_message_parent_id":self._generate_uuid()
         }
 
         # 处理工具支持
