@@ -103,3 +103,8 @@ Jenkinsfile
 deploy/
 k8s/
 helm/
+
+# 测试相关
+src/
+test_*.json
+test_*.py
