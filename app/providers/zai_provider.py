@@ -455,7 +455,7 @@ class ZAIProvider(BaseProvider):
             "chat_id": chat_id,
             "id": self._generate_uuid(),
             "current_user_message_id": self._generate_uuid(),
-            "current_user_message_parent_id":self._generate_uuid()
+            "current_user_message_parent_id": self._generate_uuid(),
         }
 
         # 处理工具支持
@@ -729,29 +729,31 @@ class ZAIProvider(BaseProvider):
                                             {"role": "assistant", "reasoning_content": content.replace("\n>", "\n")},
                                         )
                                         yield await self.format_sse_chunk(thinking_chunk)
-                                elif phase == "answer":
+                                elif phase == "answer" or phase == "other":
+                                    _pre_delta_content = delta_content if delta_content else None
                                     edit_content = data.get("edit_content", "")
                                     delta_content = data.get("delta_content", "")
 
-                                    if edit_content and "</details>\n" in edit_content:
-                                        if has_thinking:
-                                            thinking_signature = str(int(time.time() * 1000))
+                                    if edit_content:
+                                        with_detail = "</details>" in edit_content
+                                        if has_thinking and phase == "answer" and with_detail:
+                                            thinking_content_last = edit_content.split(_pre_delta_content)[-1].replace("</details>","")
                                             sig_chunk = self.create_openai_chunk(
                                                 chat_id,
                                                 model,
                                                 {
                                                     "role": "assistant",
-                                                    "thinking": {"content": "", "signature": thinking_signature},
+                                                    "reasoning_content": thinking_content_last,
                                                 },
                                             )
                                             yield await self.format_sse_chunk(sig_chunk)
-
-                                        content_after = edit_content.split("</details>\n")[-1]
-                                        if content_after:
-                                            content_chunk = self.create_openai_chunk(
-                                                chat_id, model, {"role": "assistant", "content": content_after}
-                                            )
-                                            yield await self.format_sse_chunk(content_chunk)
+                                        elif phase == "other": 
+                                            content_after = edit_content
+                                            if content_after:
+                                                content_chunk = self.create_openai_chunk(
+                                                    chat_id, model, {"role": "assistant", "content": content_after}
+                                                )
+                                                yield await self.format_sse_chunk(content_chunk)
                                     elif delta_content:
                                         if not has_thinking:
                                             has_thinking = True  # Mark as true to prevent sending role chunk again
@@ -773,7 +775,8 @@ class ZAIProvider(BaseProvider):
                                             )
                                             finish_chunk["usage"] = data["usage"]
                                             yield await self.format_sse_chunk(finish_chunk)
-                                            yield "data: [DONE]\n\n"
+                                elif phase=="done":
+                                    yield "data: [DONE]\n\n"
                         except json.JSONDecodeError as e:
                             self.logger.debug(f"❌ JSON解析错误: {e}, 内容: {chunk_str[:1000]}")
                         except Exception as e:
