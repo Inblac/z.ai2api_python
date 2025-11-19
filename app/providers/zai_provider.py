@@ -657,7 +657,7 @@ class ZAIProvider(BaseProvider):
             self.logger.info(f"🔧 初始化工具处理器: {len(transformed['body'].get('tools', []))} 个工具")
 
         has_thinking = False
-        thinking_signature = None
+        delta_content = None
         buffer = ""
         line_count = 0
         self.logger.debug("📡 开始接收 SSE 流数据...")
@@ -813,6 +813,7 @@ class ZAIProvider(BaseProvider):
 
                 try:
                     chunk = json.loads(data_str)
+                    self.logger.debug(f"💡非流式内容：{chunk}")
                 except json.JSONDecodeError:
                     continue
 
@@ -836,10 +837,13 @@ class ZAIProvider(BaseProvider):
                         )
                         reasoning_content += cleaned
                 elif phase == "answer":
-                    if edit_content and "</details>\n" in edit_content:
-                        final_content += edit_content.split("</details>\n")[-1]
+                    if edit_content and "</details>" in edit_content:
+                        reasoning_content += edit_content.split(cleaned)[-1].replace("</details>","")
                     elif delta_content:
                         final_content += delta_content
+                elif phase == "other":
+                    if edit_content:
+                        final_content += edit_content
 
         except Exception as e:
             self.logger.error(f"❌ 非流式响应处理错误: {e}")
