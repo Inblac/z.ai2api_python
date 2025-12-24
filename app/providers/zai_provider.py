@@ -119,8 +119,11 @@ class ZAIProvider(BaseProvider):
             settings.GLM45_SEARCH_MODEL: "0727-360B-API",  # GLM-4.5-Search
             settings.AIR_MODEL: "0727-106B-API",  # GLM-4.5-Air
             settings.GLM46_MODEL: "GLM-4-6-API-V1",  # GLM-4.6
-            settings.GLM46_GLM45_THINKING_MODEL: "GLM-4-6-API-V1",  # GLM-4.6-Thinking
-            settings.GLM46_GLM45_SEARCH_MODEL: "GLM-4-6-API-V1",  # GLM-4.6-Search
+            settings.GLM46_THINKING_MODEL: "GLM-4-6-API-V1",  # GLM-4.6-Thinking
+            settings.GLM46_SEARCH_MODEL: "GLM-4-6-API-V1",  # GLM-4.6-Search
+            settings.GLM47_MODEL: "glm-4.7",  # GLM-4.7
+            settings.GLM47_THINKING_MODEL: "glm-4.7",  # GLM-4.7-Thinking
+            settings.GLM47_SEARCH_MODEL: "glm-4.7",  # GLM-4.7-Search
         }
 
     def _generate_uuid(self) -> str:
@@ -135,8 +138,11 @@ class ZAIProvider(BaseProvider):
             settings.GLM45_SEARCH_MODEL,
             settings.AIR_MODEL,
             settings.GLM46_MODEL,
-            settings.GLM46_GLM45_THINKING_MODEL,
-            settings.GLM46_GLM45_SEARCH_MODEL,
+            settings.GLM46_THINKING_MODEL,
+            settings.GLM46_SEARCH_MODEL,
+            settings.GLM47_MODEL,
+            settings.GLM47_THINKING_MODEL,
+            settings.GLM47_SEARCH_MODEL,
         ]
 
     async def get_token(self) -> str:
@@ -292,7 +298,7 @@ class ZAIProvider(BaseProvider):
             "hostname": "chat.z.ai",
             "protocol": "https:",
             "referrer": "",
-            "title": "Z.ai Chat - Free AI powered by GLM-4.6 & GLM-4.5",
+            "title": "Z.ai Chat - Free AI powered by GLM-4.7 & GLM-4.6",
             # 浏览器信息（从UA解析）
             "user-agent": user_agent,
             "browser_name": browser_name,
