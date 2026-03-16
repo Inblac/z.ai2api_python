@@ -391,6 +391,43 @@ class ZAIProvider(BaseProvider):
             raise RuntimeError("上游创建 chat 成功但未返回 chat_id")
         return chat_id
 
+    async def _delete_upstream_chat(
+        self,
+        chat_id: str,
+        token: str,
+        headers: Dict[str, str],
+    ) -> None:
+        """删除已创建的 GLM-4.7 上游 chat。"""
+        if not chat_id or not token:
+            return
+
+        request_headers = {
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": headers.get("User-Agent", ""),
+            "Accept-Language": headers.get("Accept-Language", "zh-CN"),
+            "Cache-Control": "no-cache",
+            "Origin": self.base_url,
+            "Referer": f"{self.base_url}/c/{chat_id}",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.delete(
+                    f"{self.base_url}/api/v1/chats/{chat_id}",
+                    headers=request_headers,
+                )
+
+            if response.is_success:
+                self.logger.info(f"🗑️ 已删除上游 chat: {chat_id}")
+            else:
+                self.logger.warning(
+                    f"⚠️ 删除上游 chat 失败: {response.status_code} {response.text}"
+                )
+        except Exception as e:
+            self.logger.warning(f"⚠️ 删除上游 chat 异常: {e}")
+
     def _build_glm47_completion_body(
         self,
         model: str,
@@ -681,6 +718,7 @@ class ZAIProvider(BaseProvider):
             "token": token,
             "chat_id": chat_id,
             "model": requested_model,
+            "should_delete_chat": upstream_model_id == "glm-4.7",
         }
 
     @staticmethod
@@ -731,8 +769,16 @@ class ZAIProvider(BaseProvider):
                         headers=transformed["headers"],
                         json=transformed["body"],
                     )
-                # transform_response 知道如何处理上游的流并聚合成单个响应
-                return await self.transform_response(response, request, transformed)
+                try:
+                    # transform_response 知道如何处理上游的流并聚合成单个响应
+                    return await self.transform_response(response, request, transformed)
+                finally:
+                    if transformed.get("should_delete_chat"):
+                        await self._delete_upstream_chat(
+                            transformed.get("chat_id", ""),
+                            transformed.get("token", ""),
+                            transformed.get("headers", {}),
+                        )
 
         except Exception as e:
             self.log_response(False, str(e))
@@ -778,6 +824,12 @@ class ZAIProvider(BaseProvider):
                         }
                         yield f"data: {json.dumps(error_response)}\n\n"
                         yield "data: [DONE]\n\n"
+                        if transformed.get("should_delete_chat"):
+                            await self._delete_upstream_chat(
+                                transformed.get("chat_id", ""),
+                                transformed.get("token", ""),
+                                transformed.get("headers", {}),
+                            )
                         return
 
                     # 标记token使用成功（如果不是匿名模式）
@@ -791,6 +843,12 @@ class ZAIProvider(BaseProvider):
                     model = transformed["model"]
                     async for chunk in self._handle_stream_response(response, chat_id, model, transformed):
                         yield chunk
+                    if transformed.get("should_delete_chat"):
+                        await self._delete_upstream_chat(
+                            transformed.get("chat_id", ""),
+                            transformed.get("token", ""),
+                            transformed.get("headers", {}),
+                        )
                     return
 
         except Exception as e:
@@ -802,6 +860,13 @@ class ZAIProvider(BaseProvider):
             # 标记token失败（如果不是匿名模式）
             if current_token and not settings.ANONYMOUS_MODE:
                 self.mark_token_failure(current_token, e)
+
+            if transformed.get("should_delete_chat"):
+                await self._delete_upstream_chat(
+                    transformed.get("chat_id", ""),
+                    transformed.get("token", ""),
+                    transformed.get("headers", {}),
+                )
 
             # 返回错误
             error_response = {"error": {"message": str(e), "type": "stream_error"}}
