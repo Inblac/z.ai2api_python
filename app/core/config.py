@@ -147,6 +147,7 @@ class Settings(BaseSettings):
     GLM47_MODEL: str = os.getenv("GLM47_MODEL", "GLM-4.7")
     GLM47_THINKING_MODEL: str = os.getenv("GLM47_THINKING_MODEL", "GLM-4.7-Thinking")
     GLM47_SEARCH_MODEL: str = os.getenv("GLM47_SEARCH_MODEL", "GLM-4.7-Search")
+    GLM5_MODEL: str = os.getenv("GLM5_MODEL", "GLM-5")
 
 
     # Provider Model Mapping
@@ -165,6 +166,8 @@ class Settings(BaseSettings):
             "GLM-4.7": "zai",
             "GLM-4.7-Thinking": "zai",
             "GLM-4.7-Search": "zai",
+            "GLM-5": "zai",
+
             # K2Think models
             "MBZUAI-IFM/K2-Think": "k2think",
             # LongCat models

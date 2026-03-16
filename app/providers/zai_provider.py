@@ -124,6 +124,8 @@ class ZAIProvider(BaseProvider):
             settings.GLM47_MODEL: "glm-4.7",  # GLM-4.7
             settings.GLM47_THINKING_MODEL: "glm-4.7",  # GLM-4.7-Thinking
             settings.GLM47_SEARCH_MODEL: "glm-4.7",  # GLM-4.7-Search
+            settings.GLM5_MODEL: "glm-5",  # GLM-5
+
         }
 
     def _generate_uuid(self) -> str:
@@ -143,6 +145,7 @@ class ZAIProvider(BaseProvider):
             settings.GLM47_MODEL,
             settings.GLM47_THINKING_MODEL,
             settings.GLM47_SEARCH_MODEL,
+            settings.GLM5_MODEL,
         ]
 
     async def get_token(self) -> str:
@@ -305,6 +308,154 @@ class ZAIProvider(BaseProvider):
             "os_name": os_name,
         }
 
+    async def _create_upstream_chat(
+        self,
+        prompt: str,
+        model: str,
+        token: str,
+        headers: Dict[str, str],
+        enable_thinking: bool,
+        web_search: bool,
+        user_message_id: Optional[str] = None,
+        mcp_servers: Optional[List[str]] = None,
+    ) -> str:
+        """为 GLM-4.7 创建真实 chat，并返回上游 chat_id。"""
+        init_content = (prompt or "")[:500]
+        if prompt and len(prompt) > 500:
+            init_content = init_content + "..."
+
+        message_id = user_message_id or self._generate_uuid()
+        timestamp_seconds = int(time.time())
+        body = {
+            "chat": {
+                "id": "",
+                "title": "新聊天",
+                "models": [model],
+                "params": {},
+                "history": {
+                    "messages": {
+                        message_id: {
+                            "id": message_id,
+                            "parentId": None,
+                            "childrenIds": [],
+                            "role": "user",
+                            "content": init_content,
+                            "timestamp": timestamp_seconds,
+                            "models": [model],
+                        }
+                    },
+                    "currentId": message_id,
+                },
+                "tags": [],
+                "flags": [],
+                "features": [
+                    {
+                        "type": "tool_selector",
+                        "server": "tool_selector_h",
+                        "status": "hidden",
+                    }
+                ],
+                "mcp_servers": list(mcp_servers or []),
+                "enable_thinking": enable_thinking,
+                "auto_web_search": web_search,
+                "message_version": 1,
+                "extra": {},
+                "timestamp": int(time.time() * 1000),
+            }
+        }
+        request_headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": headers.get("User-Agent", ""),
+            "Accept-Language": headers.get("Accept-Language", "zh-CN"),
+            "Origin": self.base_url,
+            "Referer": f"{self.base_url}/",
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.base_url}/api/v1/chats/new",
+                headers=request_headers,
+                json=body,
+            )
+
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"上游创建 chat 失败: {response.status_code} {response.text}"
+            )
+
+        payload = response.json()
+        chat_id = str(payload.get("id") or payload.get("chat", {}).get("id") or "")
+        if not chat_id:
+            raise RuntimeError("上游创建 chat 成功但未返回 chat_id")
+        return chat_id
+
+    def _build_glm47_completion_body(
+        self,
+        model: str,
+        messages: List[Dict[str, Any]],
+        prompt: str,
+        chat_id: str,
+        requested_model: str,
+        enable_thinking: bool,
+        web_search: bool,
+        mcp_servers: List[str],
+        current_user_message_id: str,
+        current_user_message_parent_id: Optional[str],
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        """构建 GLM-4.7 专用 completions 请求体。"""
+        body = {
+            "stream": True,
+            "model": model,
+            "messages": messages,
+            "signature_prompt": prompt,
+            "params": {},
+            "extra": {},
+            "features": {
+                "image_generation": False,
+                "web_search": web_search,
+                "auto_web_search": web_search,
+                "preview_mode": True,
+                "flags": [],
+                "enable_thinking": enable_thinking,
+            },
+            "background_tasks": {
+                "title_generation": False,
+                "tags_generation": False,
+            },
+            "mcp_servers": mcp_servers,
+            "variables": {
+                "{{USER_NAME}}": "Guest",
+                "{{USER_LOCATION}}": "Unknown",
+                "{{CURRENT_DATETIME}}": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "{{CURRENT_DATE}}": datetime.now().strftime("%Y-%m-%d"),
+                "{{CURRENT_TIME}}": datetime.now().strftime("%H:%M:%S"),
+                "{{CURRENT_WEEKDAY}}": datetime.now().strftime("%A"),
+                "{{CURRENT_TIMEZONE}}": "Asia/Shanghai",
+                "{{USER_LANGUAGE}}": "zh-CN",
+            },
+            "chat_id": chat_id,
+            "id": self._generate_uuid(),
+            "current_user_message_id": current_user_message_id,
+            "current_user_message_parent_id": current_user_message_parent_id,
+        }
+
+        if tools:
+            body["tools"] = tools
+        else:
+            body["tools"] = None
+
+        if temperature is not None:
+            body["params"]["temperature"] = temperature
+        if max_tokens is not None:
+            body["params"]["max_tokens"] = max_tokens
+
+        return body
+
     async def transform_request(self, request: OpenAIRequest) -> Dict[str, Any]:
         """转换OpenAI请求为Z.AI格式"""
         self.logger.info(f"🔄 转换 OpenAI 请求到 Z.AI 格式: {request.model}")
@@ -418,64 +569,102 @@ class ZAIProvider(BaseProvider):
             self.logger.info("🔍 检测到搜索模型，添加 deep-web-search MCP 服务器")
 
         # 9. 构建上游请求体
-        chat_id = self._generate_uuid()
-
-        body = {
-            "stream": True,  # 总是使用流式
-            "model": upstream_model_id,
-            "messages": messages,
-            "signature_prompt": user_message_content,
-            "params": {},
-            "features": {
-                "image_generation": False,
-                "web_search": is_search,
-                "auto_web_search": is_search,
-                "preview_mode": True,
-                "flags": [],
-                # "features": [
-                #     {"type": "mcp", "server": "vibe-coding", "status": "hidden"},
-                #     {"type": "mcp", "server": "ppt-maker", "status": "hidden"},
-                #     {"type": "mcp", "server": "image-search", "status": "hidden"},
-                #     {"type": "mcp", "server": "deep-research", "status": "hidden"},
-                #     {"type": "tool_selector", "server": "tool_selector", "status": "hidden"},
-                #     {"type": "mcp", "server": "advanced-search", "status": "hidden"},
-                # ],
-                "enable_thinking": is_thinking,
-            },
-            "background_tasks": {
-                "title_generation": False,
-                "tags_generation": False,
-            },
-            "mcp_servers": mcp_servers,
-            "variables": {
-                "{{USER_NAME}}": "Guest",
-                "{{USER_LOCATION}}": "Unknown",
-                "{{CURRENT_DATETIME}}": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "{{CURRENT_DATE}}": datetime.now().strftime("%Y-%m-%d"),
-                "{{CURRENT_TIME}}": datetime.now().strftime("%H:%M:%S"),
-                "{{CURRENT_WEEKDAY}}": datetime.now().strftime("%A"),
-                "{{CURRENT_TIMEZONE}}": "Asia/Shanghai",
-                "{{USER_LANGUAGE}}": "zh-CN",
-            },
-            "model_item": {"id": upstream_model_id, "name": requested_model, "owned_by": "z.ai"},
-            "chat_id": chat_id,
-            "id": self._generate_uuid(),
-            "current_user_message_id": self._generate_uuid(),
-            "current_user_message_parent_id": self._generate_uuid(),
-        }
-
-        # 处理工具支持
-        if settings.TOOL_SUPPORT and not is_thinking and request.tools:
-            body["tools"] = request.tools
-            self.logger.info(f"启用工具支持: {len(request.tools)} 个工具")
+        current_user_message_id = self._generate_uuid()
+        self.logger.warning(f"请求模型：{requested_model}，上游模型ID：{upstream_model_id}，思考模式：{is_thinking}，搜索模式：{is_search}")
+        if upstream_model_id == "glm-4.7":
+            chat_id = await self._create_upstream_chat(
+                prompt=user_message_content or "",
+                model=upstream_model_id,
+                token=token,
+                headers=headers,
+                enable_thinking=is_thinking,
+                web_search=is_search,
+                user_message_id=current_user_message_id,
+                mcp_servers=mcp_servers,
+            )
+            headers["Referer"] = f"{self.base_url}/c/{chat_id}"
+            params["current_url"] = f"{self.base_url}/c/{chat_id}"
+            params["pathname"] = f"/c/{chat_id}"
+            current_user_message_parent_id = None
+            self.logger.warning(f"已创建GLM-4.7聊天会话，ChatID：{chat_id}")
         else:
-            body["tools"] = None
+            chat_id = self._generate_uuid()
+            current_user_message_parent_id = self._generate_uuid()
 
-        # 处理其他参数
-        if request.temperature is not None:
-            body["params"]["temperature"] = request.temperature
-        if request.max_tokens is not None:
-            body["params"]["max_tokens"] = request.max_tokens
+        tools = request.tools if settings.TOOL_SUPPORT and not is_thinking and request.tools else None
+        if tools:
+            self.logger.info(f"启用工具支持: {len(tools)} 个工具")
+
+        if upstream_model_id == "glm-4.7":
+            body = self._build_glm47_completion_body(
+                model=upstream_model_id,
+                messages=messages,
+                prompt=user_message_content or "",
+                chat_id=chat_id,
+                requested_model=requested_model,
+                enable_thinking=is_thinking,
+                web_search=is_search,
+                mcp_servers=mcp_servers,
+                current_user_message_id=current_user_message_id,
+                current_user_message_parent_id=current_user_message_parent_id,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                tools=tools,
+            )
+        else:
+            body = {
+                "stream": True,  # 总是使用流式
+                "model": upstream_model_id,
+                "messages": messages,
+                "signature_prompt": user_message_content,
+                "params": {},
+                "features": {
+                    "image_generation": False,
+                    "web_search": is_search,
+                    "auto_web_search": is_search,
+                    "preview_mode": True,
+                    "flags": [],
+                    # "features": [
+                    #     {"type": "mcp", "server": "vibe-coding", "status": "hidden"},
+                    #     {"type": "mcp", "server": "ppt-maker", "status": "hidden"},
+                    #     {"type": "mcp", "server": "image-search", "status": "hidden"},
+                    #     {"type": "mcp", "server": "deep-research", "status": "hidden"},
+                    #     {"type": "tool_selector", "server": "tool_selector", "status": "hidden"},
+                    #     {"type": "mcp", "server": "advanced-search", "status": "hidden"},
+                    # ],
+                    "enable_thinking": is_thinking,
+                },
+                "background_tasks": {
+                    "title_generation": False,
+                    "tags_generation": False,
+                },
+                "mcp_servers": mcp_servers,
+                "variables": {
+                    "{{USER_NAME}}": "Guest",
+                    "{{USER_LOCATION}}": "Unknown",
+                    "{{CURRENT_DATETIME}}": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "{{CURRENT_DATE}}": datetime.now().strftime("%Y-%m-%d"),
+                    "{{CURRENT_TIME}}": datetime.now().strftime("%H:%M:%S"),
+                    "{{CURRENT_WEEKDAY}}": datetime.now().strftime("%A"),
+                    "{{CURRENT_TIMEZONE}}": "Asia/Shanghai",
+                    "{{USER_LANGUAGE}}": "zh-CN",
+                },
+                "model_item": {"id": upstream_model_id, "name": requested_model, "owned_by": "z.ai"},
+                "chat_id": chat_id,
+                "id": self._generate_uuid(),
+                "current_user_message_id": current_user_message_id,
+                "current_user_message_parent_id": current_user_message_parent_id,
+            }
+
+            if tools:
+                body["tools"] = tools
+            else:
+                body["tools"] = None
+
+            if request.temperature is not None:
+                body["params"]["temperature"] = request.temperature
+            if request.max_tokens is not None:
+                body["params"]["max_tokens"] = request.max_tokens
 
         # 9. 返回转换后的请求对象
         # 存储当前token用于错误处理
