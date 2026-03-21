@@ -319,7 +319,7 @@ class ZAIProvider(BaseProvider):
         user_message_id: Optional[str] = None,
         mcp_servers: Optional[List[str]] = None,
     ) -> str:
-        """为 GLM-4.7 创建真实 chat，并返回上游 chat_id。"""
+        """为需要真实会话的模型创建上游 chat，并返回 chat_id。"""
         init_content = (prompt or "")[:500]
         if prompt and len(prompt) > 500:
             init_content = init_content + "..."
@@ -397,7 +397,7 @@ class ZAIProvider(BaseProvider):
         token: str,
         headers: Dict[str, str],
     ) -> None:
-        """删除已创建的 GLM-4.7 上游 chat。"""
+        """删除已创建的上游 chat。"""
         if not chat_id or not token:
             return
 
@@ -607,8 +607,9 @@ class ZAIProvider(BaseProvider):
 
         # 9. 构建上游请求体
         current_user_message_id = self._generate_uuid()
-        self.logger.warning(f"请求模型：{requested_model}，上游模型ID：{upstream_model_id}，思考模式：{is_thinking}，搜索模式：{is_search}")
-        if upstream_model_id == "glm-4.7":
+        requires_real_chat = upstream_model_id in {"glm-4.7", "glm-5", "GLM-4-6-API-V1"}
+        self.logger.debug(f"请求模型：{requested_model}，上游模型ID：{upstream_model_id}，思考模式：{is_thinking}，搜索模式：{is_search}")
+        if requires_real_chat:
             chat_id = await self._create_upstream_chat(
                 prompt=user_message_content or "",
                 model=upstream_model_id,
@@ -623,7 +624,7 @@ class ZAIProvider(BaseProvider):
             params["current_url"] = f"{self.base_url}/c/{chat_id}"
             params["pathname"] = f"/c/{chat_id}"
             current_user_message_parent_id = None
-            self.logger.warning(f"已创建GLM-4.7聊天会话，ChatID：{chat_id}")
+            self.logger.info(f"已创建真实聊天会话，模型：{upstream_model_id}，ChatID：{chat_id}")
         else:
             chat_id = self._generate_uuid()
             current_user_message_parent_id = self._generate_uuid()
@@ -718,7 +719,7 @@ class ZAIProvider(BaseProvider):
             "token": token,
             "chat_id": chat_id,
             "model": requested_model,
-            "should_delete_chat": upstream_model_id == "glm-4.7",
+            "should_delete_chat": requires_real_chat,
         }
 
     @staticmethod
