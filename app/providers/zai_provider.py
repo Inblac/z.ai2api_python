@@ -642,8 +642,9 @@ class ZAIProvider(BaseProvider):
                 reasoning_content, content_text = _extract_reasoning_and_content(msg)
                 message_body_parts = []
 
-                if reasoning_content:
-                    message_body_parts.append(f"<think>\n{reasoning_content}\n</think>")
+                ## 是否填充think部分
+                # if reasoning_content:
+                #     message_body_parts.append(f"<think>\n{reasoning_content}\n</think>")
 
                 if content_text.strip():
                     message_body_parts.append(content_text.strip())
