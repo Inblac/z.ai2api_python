@@ -520,19 +520,16 @@ class ZAIProvider(BaseProvider):
     async def transform_request(self, request: OpenAIRequest) -> Dict[str, Any]:
         """转换OpenAI请求为Z.AI格式"""
         self.logger.info(f"🔄 转换 OpenAI 请求到 Z.AI 格式: {request.model}")
-        
+
         # 0. 将输入的openai格式messages合并为1条role消息，多条消息内容按角色拼接
         if request.messages:
-            merged_message_parts = []
-            for msg in request.messages:
-                role = msg.role or "user"
-                content_text = ""
 
-                if isinstance(msg.content, str):
-                    content_text = msg.content
-                elif isinstance(msg.content, list):
+            def _extract_visible_text(content: Any) -> str:
+                if isinstance(content, str):
+                    return content
+                if isinstance(content, list):
                     text_parts = []
-                    for part in msg.content:
+                    for part in content:
                         if (
                             hasattr(part, "type")
                             and part.type == "text"
@@ -540,15 +537,126 @@ class ZAIProvider(BaseProvider):
                             and part.text
                         ):
                             text_parts.append(part.text)
-                    content_text = "\n".join(text_parts)
+                        elif isinstance(part, str):
+                            text_parts.append(part)
+                    return "\n".join(text_parts)
+                if content is None:
+                    return ""
+                return str(content)
 
-                if msg.reasoning_content:
-                    if content_text:
-                        content_text = f"{content_text}\n{msg.reasoning_content}"
+            def _extract_reasoning_and_content(msg: Message) -> tuple[str, str]:
+                content_text = _extract_visible_text(msg.content)
+                reasoning_text = (msg.reasoning_content or "").strip()
+
+                if (
+                    not reasoning_text
+                    and "<think>" in content_text
+                    and "</think>" in content_text
+                ):
+                    think_start = content_text.find("<think>")
+                    think_end = content_text.find("</think>", think_start)
+                    if think_end != -1:
+                        reasoning_text = content_text[
+                            think_start + len("<think>") : think_end
+                        ].strip()
+                        content_text = content_text[
+                            think_end + len("</think>") :
+                        ].lstrip()
+
+                return reasoning_text, content_text
+
+            def _serialize_tool_calls(tool_calls: Any) -> str:
+                if not tool_calls:
+                    return ""
+
+                serialized_calls = []
+                for tool_call in tool_calls:
+                    function_call = (
+                        tool_call.get("function", tool_call)
+                        if isinstance(tool_call, dict)
+                        else tool_call
+                    )
+                    name = ""
+                    arguments = {}
+
+                    if isinstance(function_call, dict):
+                        name = function_call.get("name", "")
+                        arguments = function_call.get("arguments", {})
                     else:
-                        content_text = msg.reasoning_content
+                        name = getattr(function_call, "name", "")
+                        arguments = getattr(function_call, "arguments", {})
 
-                merged_message_parts.append(f"<|{role}|>\n{content_text}".rstrip())
+                    if isinstance(arguments, str):
+                        try:
+                            arguments = json.loads(arguments)
+                        except (TypeError, ValueError):
+                            arguments = {"arguments": arguments}
+                    elif arguments is None:
+                        arguments = {}
+
+                    arg_parts = []
+                    if isinstance(arguments, dict):
+                        for key, value in arguments.items():
+                            arg_value = (
+                                value
+                                if isinstance(value, str)
+                                else json.dumps(value, ensure_ascii=False)
+                            )
+                            arg_parts.append(
+                                f"<arg_key>{key}</arg_key><arg_value>{arg_value}</arg_value>"
+                            )
+                    else:
+                        raw_arguments = (
+                            arguments
+                            if isinstance(arguments, str)
+                            else json.dumps(arguments, ensure_ascii=False)
+                        )
+                        arg_parts.append(
+                            f"<arg_key>arguments</arg_key><arg_value>{raw_arguments}</arg_value>"
+                        )
+
+                    serialized_calls.append(
+                        f"<tool_call>{name}{''.join(arg_parts)}</tool_call>"
+                    )
+
+                return "\n".join(serialized_calls)
+
+            merged_message_parts = []
+            previous_role = None
+            for msg in request.messages:
+                role = msg.role or "user"
+                if role == "tool":
+                    tool_content = _extract_visible_text(msg.content).strip()
+                    tool_message_parts = []
+                    if previous_role != "tool":
+                        tool_message_parts.append("<|observation|>")
+                    tool_message_parts.append(
+                        f"<tool_response>{tool_content}</tool_response>"
+                    )
+                    merged_message_parts.append(
+                        "\n".join(part for part in tool_message_parts if part).rstrip()
+                    )
+                    previous_role = role
+                    continue
+
+                reasoning_content, content_text = _extract_reasoning_and_content(msg)
+                message_body_parts = []
+
+                if reasoning_content:
+                    message_body_parts.append(f"<think>\n{reasoning_content}\n</think>")
+
+                if content_text.strip():
+                    message_body_parts.append(content_text.strip())
+
+                tool_calls_text = ""
+                if role == "assistant":
+                    tool_calls_text = _serialize_tool_calls(msg.tool_calls)
+                    if tool_calls_text:
+                        message_body_parts.append(tool_calls_text)
+
+                message_body = "\n".join(part for part in message_body_parts if part)
+                merged_message_parts.append(f"<|{role}|>\n{message_body}".rstrip())
+                previous_role = role
 
             merged_messages_content = "\n".join(
                 part for part in merged_message_parts if part
