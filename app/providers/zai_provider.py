@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, AsyncGenerator, Union
 
 from app.providers.base import BaseProvider, ProviderConfig
-from app.models.schemas import OpenAIRequest
+from app.models.schemas import OpenAIRequest, Message
 from app.core.config import settings
 from app.utils.logger import get_logger
 from app.utils.token_pool import get_token_pool
@@ -39,7 +39,15 @@ def get_zai_dynamic_headers(chat_id: str = "") -> Dict[str, str]:
         Dict[str, str]: 包含 Z.AI 特定配置的 headers
     """
     # 随机选择浏览器类型，偏向Chrome和Edge
-    browser_choices = ["chrome", "chrome", "chrome", "edge", "edge", "firefox", "safari"]
+    browser_choices = [
+        "chrome",
+        "chrome",
+        "chrome",
+        "edge",
+        "edge",
+        "firefox",
+        "safari",
+    ]
     browser_type = random.choice(browser_choices)
 
     user_agent = get_random_user_agent(browser_type)
@@ -101,7 +109,10 @@ class ZAIProvider(BaseProvider):
 
     def __init__(self):
         config = ProviderConfig(
-            name="zai", api_endpoint=settings.API_ENDPOINT, timeout=30, headers=get_zai_dynamic_headers()
+            name="zai",
+            api_endpoint=settings.API_ENDPOINT,
+            timeout=30,
+            headers=get_zai_dynamic_headers(),
         )
         super().__init__(config)
 
@@ -125,7 +136,6 @@ class ZAIProvider(BaseProvider):
             settings.GLM47_THINKING_MODEL: "glm-4.7",  # GLM-4.7-Thinking
             settings.GLM47_SEARCH_MODEL: "glm-4.7",  # GLM-4.7-Search
             settings.GLM5_MODEL: "glm-5",  # GLM-5
-
         }
 
     def _generate_uuid(self) -> str:
@@ -160,7 +170,9 @@ class ZAIProvider(BaseProvider):
             try:
                 headers = get_zai_dynamic_headers()
                 async with httpx.AsyncClient() as client:
-                    response = await client.get(self.auth_url, headers=headers, timeout=10.0)
+                    response = await client.get(
+                        self.auth_url, headers=headers, timeout=10.0
+                    )
                     if response.status_code == 200:
                         data = response.json()
                         token = data.get("token", "")
@@ -190,15 +202,19 @@ class ZAIProvider(BaseProvider):
         token_pool = get_token_pool()
         if token_pool:
             error_to_report = (
-                error if error is not None else Exception("Token failure reported without specific error")
+                error
+                if error is not None
+                else Exception("Token failure reported without specific error")
             )
             token_pool.mark_token_failure(token, error_to_report)
 
-    def _generate_signature_params(self, token: str, user_message: Optional[str]) -> Optional[Dict[str, Any]]:
+    def _generate_signature_params(
+        self, token: str, user_message: Optional[str]
+    ) -> Optional[Dict[str, Any]]:
         """为Z.AI请求生成签名和相关参数"""
         try:
             # 1. 解码JWT令牌
-            parts = token.split('.')
+            parts = token.split(".")
             if len(parts) != 3:
                 self.logger.error("无效的JWT令牌格式，无法生成签名")
                 return None
@@ -206,11 +222,11 @@ class ZAIProvider(BaseProvider):
             payload_b64 = parts[1]
             padding = 4 - len(payload_b64) % 4
             if padding != 4:
-                payload_b64 += '=' * padding
+                payload_b64 += "=" * padding
 
             decoded_payload = base64.urlsafe_b64decode(payload_b64)
             payload = json.loads(decoded_payload)
-            user_id = payload.get('id')
+            user_id = payload.get("id")
             if not user_id:
                 self.logger.error("从JWT令牌中无法获取 'id'，无法生成签名")
                 return None
@@ -223,18 +239,26 @@ class ZAIProvider(BaseProvider):
             # 3. 构造签名
             # 签名1：时间及key
             time_5min_split = timestamp // (5 * 60 * 1000)
-            key = settings.ZAI_SIGNATURE_KEY.encode('utf-8')
-            signature_pre = hmac.new(key, str(time_5min_split).encode('utf-8'), hashlib.sha256).hexdigest()
+            key = settings.ZAI_SIGNATURE_KEY.encode("utf-8")
+            signature_pre = hmac.new(
+                key, str(time_5min_split).encode("utf-8"), hashlib.sha256
+            ).hexdigest()
             # 签名2：对消息签名
             # 用户最后一条消息
             safe_user_message = user_message or ""
             # 带请求信息的拼接字段
-            request_info = f"requestId,{request_id},timestamp,{timestamp},user_id,{user_id}"
+            request_info = (
+                f"requestId,{request_id},timestamp,{timestamp},user_id,{user_id}"
+            )
             # 用户消息的Base64编码
-            user_message_encode = base64.b64encode(safe_user_message.encode('utf-8')).decode('utf-8')
+            user_message_encode = base64.b64encode(
+                safe_user_message.encode("utf-8")
+            ).decode("utf-8")
             # 完整签名字符串
             sign_str = f"{request_info}|{user_message_encode}|{str(timestamp)}"
-            signature = hmac.new(signature_pre.encode('utf-8'), sign_str.encode('utf-8'), hashlib.sha256).hexdigest()
+            signature = hmac.new(
+                signature_pre.encode("utf-8"), sign_str.encode("utf-8"), hashlib.sha256
+            ).hexdigest()
 
             return {
                 "user_id": user_id,
@@ -496,6 +520,40 @@ class ZAIProvider(BaseProvider):
     async def transform_request(self, request: OpenAIRequest) -> Dict[str, Any]:
         """转换OpenAI请求为Z.AI格式"""
         self.logger.info(f"🔄 转换 OpenAI 请求到 Z.AI 格式: {request.model}")
+        
+        # 0. 将输入的openai格式messages合并为1条role消息，多条消息内容按角色拼接
+        if request.messages:
+            merged_message_parts = []
+            for msg in request.messages:
+                role = msg.role or "user"
+                content_text = ""
+
+                if isinstance(msg.content, str):
+                    content_text = msg.content
+                elif isinstance(msg.content, list):
+                    text_parts = []
+                    for part in msg.content:
+                        if (
+                            hasattr(part, "type")
+                            and part.type == "text"
+                            and hasattr(part, "text")
+                            and part.text
+                        ):
+                            text_parts.append(part.text)
+                    content_text = "\n".join(text_parts)
+
+                if msg.reasoning_content:
+                    if content_text:
+                        content_text = f"{content_text}\n{msg.reasoning_content}"
+                    else:
+                        content_text = msg.reasoning_content
+
+                merged_message_parts.append(f"<|{role}|>\n{content_text}".rstrip())
+
+            merged_messages_content = "\n".join(
+                part for part in merged_message_parts if part
+            )
+            request.messages = [Message(role="user", content=merged_messages_content)]
 
         # 1. 获取认证令牌
         token = await self.get_token()
@@ -520,11 +578,17 @@ class ZAIProvider(BaseProvider):
                 user_message_content = last_message.content
             elif isinstance(last_message.content, list):
                 for part in reversed(last_message.content):
-                    if hasattr(part, 'type') and part.type == 'text' and hasattr(part, 'text'):
+                    if (
+                        hasattr(part, "type")
+                        and part.type == "text"
+                        and hasattr(part, "text")
+                    ):
                         user_message_content = part.text
                         break
         if not user_message_content:
-            self.logger.warning("⚠️ 无法从请求中找到用户消息内容用于签名，将使用空字符串")
+            self.logger.warning(
+                "⚠️ 无法从请求中找到用户消息内容用于签名，将使用空字符串"
+            )
 
         # 3. 生成签名及相关参数
         signature_params = self._generate_signature_params(token, user_message_content)
@@ -581,7 +645,7 @@ class ZAIProvider(BaseProvider):
                 # 处理多模态内容
                 content_parts = []
                 for part in msg.content:
-                    if hasattr(part, 'type') and hasattr(part, 'text'):
+                    if hasattr(part, "type") and hasattr(part, "text"):
                         content_parts.append({"type": part.type, "text": part.text})
                 messages.append({"role": msg.role, "content": content_parts})
 
@@ -589,12 +653,21 @@ class ZAIProvider(BaseProvider):
         requested_model = request.model
         is_search = "-search" in requested_model.casefold()
         # 判断思考模式，如果body中的messages中的content是list，就开启思考。
-        is_anthropic_messages = any(isinstance(msg.content, list) for msg in request.messages)
+        is_anthropic_messages = any(
+            isinstance(msg.content, list) for msg in request.messages
+        )
         if is_anthropic_messages:
             self.logger.info(f"content为List，开启思考： {is_anthropic_messages}")
         # 正常判断，body中带thinking或者模型名带-thinking
-        requested_thinking_enable = isinstance(request.thinking, dict) and request.thinking.get("type") == "enabled"
-        is_thinking = is_anthropic_messages or requested_thinking_enable or ("-thinking" in requested_model.casefold())
+        requested_thinking_enable = (
+            isinstance(request.thinking, dict)
+            and request.thinking.get("type") == "enabled"
+        )
+        is_thinking = (
+            is_anthropic_messages
+            or requested_thinking_enable
+            or ("-thinking" in requested_model.casefold())
+        )
 
         # 获取上游模型ID
         upstream_model_id = self.model_mapping.get(requested_model, "0727-360B-API")
@@ -608,7 +681,9 @@ class ZAIProvider(BaseProvider):
         # 9. 构建上游请求体
         current_user_message_id = self._generate_uuid()
         requires_real_chat = upstream_model_id in {"glm-4.7", "glm-5", "GLM-4-6-API-V1"}
-        self.logger.debug(f"请求模型：{requested_model}，上游模型ID：{upstream_model_id}，思考模式：{is_thinking}，搜索模式：{is_search}")
+        self.logger.debug(
+            f"请求模型：{requested_model}，上游模型ID：{upstream_model_id}，思考模式：{is_thinking}，搜索模式：{is_search}"
+        )
         if requires_real_chat:
             chat_id = await self._create_upstream_chat(
                 prompt=user_message_content or "",
@@ -624,12 +699,18 @@ class ZAIProvider(BaseProvider):
             params["current_url"] = f"{self.base_url}/c/{chat_id}"
             params["pathname"] = f"/c/{chat_id}"
             current_user_message_parent_id = None
-            self.logger.info(f"已创建真实聊天会话，模型：{upstream_model_id}，ChatID：{chat_id}")
+            self.logger.info(
+                f"已创建真实聊天会话，模型：{upstream_model_id}，ChatID：{chat_id}"
+            )
         else:
             chat_id = self._generate_uuid()
             current_user_message_parent_id = self._generate_uuid()
 
-        tools = request.tools if settings.TOOL_SUPPORT and not is_thinking and request.tools else None
+        tools = (
+            request.tools
+            if settings.TOOL_SUPPORT and not is_thinking and request.tools
+            else None
+        )
         if tools:
             self.logger.info(f"启用工具支持: {len(tools)} 个工具")
 
@@ -680,14 +761,20 @@ class ZAIProvider(BaseProvider):
                 "variables": {
                     "{{USER_NAME}}": "Guest",
                     "{{USER_LOCATION}}": "Unknown",
-                    "{{CURRENT_DATETIME}}": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "{{CURRENT_DATETIME}}": datetime.now().strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    ),
                     "{{CURRENT_DATE}}": datetime.now().strftime("%Y-%m-%d"),
                     "{{CURRENT_TIME}}": datetime.now().strftime("%H:%M:%S"),
                     "{{CURRENT_WEEKDAY}}": datetime.now().strftime("%A"),
                     "{{CURRENT_TIMEZONE}}": "Asia/Shanghai",
                     "{{USER_LANGUAGE}}": "zh-CN",
                 },
-                "model_item": {"id": upstream_model_id, "name": requested_model, "owned_by": "z.ai"},
+                "model_item": {
+                    "id": upstream_model_id,
+                    "name": requested_model,
+                    "owned_by": "z.ai",
+                },
                 "chat_id": chat_id,
                 "id": self._generate_uuid(),
                 "current_user_message_id": current_user_message_id,
@@ -708,9 +795,15 @@ class ZAIProvider(BaseProvider):
         # 存储当前token用于错误处理
         self._current_token = token
         # 日志输出：格式化的json
-        self.logger.debug(f"转换后的请求头:\n {json.dumps(headers, ensure_ascii=False, indent=2)}")
-        self.logger.debug(f"转换后的请求参数:\n {json.dumps(params, ensure_ascii=False, indent=2)}")
-        self.logger.debug(f"转换后的请求体:\n {json.dumps(body, ensure_ascii=False, indent=2)}")
+        self.logger.debug(
+            f"转换后的请求头:\n {json.dumps(headers, ensure_ascii=False, indent=2)}"
+        )
+        self.logger.debug(
+            f"转换后的请求参数:\n {json.dumps(params, ensure_ascii=False, indent=2)}"
+        )
+        self.logger.debug(
+            f"转换后的请求体:\n {json.dumps(body, ensure_ascii=False, indent=2)}"
+        )
         return {
             "url": url,
             "params": params,
@@ -785,7 +878,9 @@ class ZAIProvider(BaseProvider):
             self.log_response(False, str(e))
             if request.stream:
                 # 对于流式请求，在主函数中捕获异常时返回一个错误生成器
-                return self._streaming_error_generator(f"请求处理时发生未知错误: {e}", "internal_error")
+                return self._streaming_error_generator(
+                    f"请求处理时发生未知错误: {e}", "internal_error"
+                )
             else:
                 return self.handle_error(e, "请求处理")
 
@@ -813,7 +908,7 @@ class ZAIProvider(BaseProvider):
                         # 其他错误，直接返回
                         self.logger.error(f"❌ 上游返回错误: {response.status_code}")
                         error_text = await response.aread()
-                        error_msg = error_text.decode('utf-8', errors='ignore')
+                        error_msg = error_text.decode("utf-8", errors="ignore")
                         if error_msg:
                             self.logger.error(f"❌ 错误详情: {error_msg}")
                         error_response = {
@@ -842,7 +937,9 @@ class ZAIProvider(BaseProvider):
                     # 处理流式响应
                     chat_id = transformed["chat_id"]
                     model = transformed["model"]
-                    async for chunk in self._handle_stream_response(response, chat_id, model, transformed):
+                    async for chunk in self._handle_stream_response(
+                        response, chat_id, model, transformed
+                    ):
                         yield chunk
                     if transformed.get("should_delete_chat"):
                         await self._delete_upstream_chat(
@@ -876,7 +973,10 @@ class ZAIProvider(BaseProvider):
             return
 
     async def transform_response(
-        self, response: httpx.Response, request: OpenAIRequest, transformed: Dict[str, Any]
+        self,
+        response: httpx.Response,
+        request: OpenAIRequest,
+        transformed: Dict[str, Any],
     ) -> Union[Dict[str, Any], AsyncGenerator[str, None]]:
         """转换Z.AI响应为OpenAI格式"""
         chat_id = transformed["chat_id"]
@@ -891,7 +991,9 @@ class ZAIProvider(BaseProvider):
                 return self.handle_error(Exception(error_msg), "API响应")
             # 对于流式请求，返回一个错误生成器
             else:
-                return self._streaming_error_generator(error_msg, "upstream_error", response.status_code)
+                return self._streaming_error_generator(
+                    error_msg, "upstream_error", response.status_code
+                )
 
         if request.stream:
             return self._handle_stream_response(response, chat_id, model, transformed)
@@ -899,7 +1001,11 @@ class ZAIProvider(BaseProvider):
             return await self._handle_non_stream_response(response, chat_id, model)
 
     async def _handle_stream_response(
-        self, response: httpx.Response, chat_id: str, model: str, transformed: Dict[str, Any]
+        self,
+        response: httpx.Response,
+        chat_id: str,
+        model: str,
+        transformed: Dict[str, Any],
     ) -> AsyncGenerator[str, None]:
         """处理Z.AI流式响应"""
         self.logger.info(f"✅ Z.AI 响应成功，开始处理 SSE 流")
@@ -915,7 +1021,9 @@ class ZAIProvider(BaseProvider):
 
         if has_tools:
             tool_handler = SSEToolHandler(model, stream=True)
-            self.logger.info(f"🔧 初始化工具处理器: {len(transformed['body'].get('tools', []))} 个工具")
+            self.logger.info(
+                f"🔧 初始化工具处理器: {len(transformed['body'].get('tools', []))} 个工具"
+            )
 
         has_thinking = False
         delta_content = None
@@ -954,7 +1062,9 @@ class ZAIProvider(BaseProvider):
                                 data = chunk.get("data", {})
                                 phase = data.get("phase")
 
-                                if phase and phase != getattr(self, '_last_phase', None):
+                                if phase and phase != getattr(
+                                    self, "_last_phase", None
+                                ):
                                     self.logger.info(f"📈 SSE 阶段: {phase}")
                                     self._last_phase = phase
 
@@ -966,19 +1076,25 @@ class ZAIProvider(BaseProvider):
                                         "edit_index": data.get("edit_index"),
                                         "usage": data.get("usage", {}),
                                     }
-                                    for output in tool_handler.process_sse_chunk(sse_chunk):
+                                    for output in tool_handler.process_sse_chunk(
+                                        sse_chunk
+                                    ):
                                         yield output
                                 elif phase == "thinking":
                                     if not has_thinking:
                                         has_thinking = True
-                                        role_chunk = self.create_openai_chunk(chat_id, model, {"role": "assistant"})
+                                        role_chunk = self.create_openai_chunk(
+                                            chat_id, model, {"role": "assistant"}
+                                        )
                                         yield await self.format_sse_chunk(role_chunk)
 
                                     delta_content = data.get("delta_content", "")
                                     if delta_content:
                                         # 处理思考内容格式
                                         content = (
-                                            delta_content.split("</summary>\n>")[-1].strip()
+                                            delta_content.split("</summary>\n>")[
+                                                -1
+                                            ].strip()
                                             if delta_content.startswith("<details")
                                             and "</summary>\n>" in delta_content
                                             else delta_content
@@ -987,18 +1103,33 @@ class ZAIProvider(BaseProvider):
                                         thinking_chunk = self.create_openai_chunk(
                                             chat_id,
                                             model,
-                                            {"role": "assistant", "reasoning_content": content.replace("\n>", "\n")},
+                                            {
+                                                "role": "assistant",
+                                                "reasoning_content": content.replace(
+                                                    "\n>", "\n"
+                                                ),
+                                            },
                                         )
-                                        yield await self.format_sse_chunk(thinking_chunk)
+                                        yield await self.format_sse_chunk(
+                                            thinking_chunk
+                                        )
                                 elif phase == "answer" or phase == "other":
-                                    _pre_delta_content = delta_content if delta_content else None
+                                    _pre_delta_content = (
+                                        delta_content if delta_content else None
+                                    )
                                     edit_content = data.get("edit_content", "")
                                     delta_content = data.get("delta_content", "")
 
                                     if edit_content:
                                         with_detail = "</details>" in edit_content
-                                        if has_thinking and phase == "answer" and with_detail:
-                                            thinking_content_last = edit_content.split(_pre_delta_content)[-1].replace("</details>","")
+                                        if (
+                                            has_thinking
+                                            and phase == "answer"
+                                            and with_detail
+                                        ):
+                                            thinking_content_last = edit_content.split(
+                                                _pre_delta_content
+                                            )[-1].replace("</details>", "")
                                             sig_chunk = self.create_openai_chunk(
                                                 chat_id,
                                                 model,
@@ -1008,40 +1139,67 @@ class ZAIProvider(BaseProvider):
                                                 },
                                             )
                                             yield await self.format_sse_chunk(sig_chunk)
-                                        elif phase == "other": 
+                                        elif phase == "other":
                                             content_after = edit_content
                                             if content_after:
-                                                content_chunk = self.create_openai_chunk(
-                                                    chat_id, model, {"role": "assistant", "content": content_after}
+                                                content_chunk = (
+                                                    self.create_openai_chunk(
+                                                        chat_id,
+                                                        model,
+                                                        {
+                                                            "role": "assistant",
+                                                            "content": content_after,
+                                                        },
+                                                    )
                                                 )
-                                                yield await self.format_sse_chunk(content_chunk)
+                                                yield await self.format_sse_chunk(
+                                                    content_chunk
+                                                )
                                     elif delta_content:
                                         if not has_thinking:
                                             has_thinking = True  # Mark as true to prevent sending role chunk again
                                             role_chunk = self.create_openai_chunk(
                                                 chat_id, model, {"role": "assistant"}
                                             )
-                                            yield await self.format_sse_chunk(role_chunk)
+                                            yield await self.format_sse_chunk(
+                                                role_chunk
+                                            )
 
                                         content_chunk = self.create_openai_chunk(
-                                            chat_id, model, {"role": "assistant", "content": delta_content}
+                                            chat_id,
+                                            model,
+                                            {
+                                                "role": "assistant",
+                                                "content": delta_content,
+                                            },
                                         )
                                         yield await self.format_sse_chunk(content_chunk)
 
                                     if data.get("usage"):
-                                        self.logger.info(f"📦 完成响应 - 使用统计: {json.dumps(data['usage'])}")
+                                        self.logger.info(
+                                            f"📦 完成响应 - 使用统计: {json.dumps(data['usage'])}"
+                                        )
                                         if not tool_handler:
                                             finish_chunk = self.create_openai_chunk(
-                                                chat_id, model, {"role": "assistant", "content": ""}, "stop"
+                                                chat_id,
+                                                model,
+                                                {"role": "assistant", "content": ""},
+                                                "stop",
                                             )
                                             finish_chunk["usage"] = data["usage"]
-                                            yield await self.format_sse_chunk(finish_chunk)
-                                elif phase=="done":
+                                            yield await self.format_sse_chunk(
+                                                finish_chunk
+                                            )
+                                elif phase == "done":
                                     yield "data: [DONE]\n\n"
                         except json.JSONDecodeError as e:
-                            self.logger.debug(f"❌ JSON解析错误: {e}, 内容: {chunk_str[:1000]}")
+                            self.logger.debug(
+                                f"❌ JSON解析错误: {e}, 内容: {chunk_str[:1000]}"
+                            )
                         except Exception as e:
-                            self.logger.error(f"❌ 处理chunk错误: {e}, chunk: {chunk_str[:1000]}")
+                            self.logger.error(
+                                f"❌ 处理chunk错误: {e}, chunk: {chunk_str[:1000]}"
+                            )
 
             if not tool_handler:
                 self.logger.debug("📤 发送最终 [DONE] 信号 (如果尚未发送)")
@@ -1054,14 +1212,22 @@ class ZAIProvider(BaseProvider):
             import traceback
 
             self.logger.error(traceback.format_exc())
-            async for chunk in self._streaming_error_generator("流处理失败", "stream_error"):
+            async for chunk in self._streaming_error_generator(
+                "流处理失败", "stream_error"
+            ):
                 yield chunk
 
-    async def _handle_non_stream_response(self, response: httpx.Response, chat_id: str, model: str) -> Dict[str, Any]:
+    async def _handle_non_stream_response(
+        self, response: httpx.Response, chat_id: str, model: str
+    ) -> Dict[str, Any]:
         """处理非流式响应"""
         final_content = ""
         reasoning_content = ""
-        usage_info: Dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        usage_info: Dict[str, int] = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        }
 
         try:
             async for line in response.aiter_lines():
@@ -1093,13 +1259,16 @@ class ZAIProvider(BaseProvider):
                     if delta_content:
                         cleaned = (
                             delta_content.split("</summary>\n>")[-1].strip()
-                            if delta_content.startswith("<details") and "</summary>\n>" in delta_content
+                            if delta_content.startswith("<details")
+                            and "</summary>\n>" in delta_content
                             else delta_content
                         )
                         reasoning_content += cleaned
                 elif phase == "answer":
                     if edit_content and "</details>" in edit_content:
-                        reasoning_content += edit_content.split(cleaned)[-1].replace("</details>","")
+                        reasoning_content += edit_content.split(cleaned)[-1].replace(
+                            "</details>", ""
+                        )
                     elif delta_content:
                         final_content += delta_content
                 elif phase == "other":
@@ -1118,4 +1287,6 @@ class ZAIProvider(BaseProvider):
         if not final_content and reasoning_content:
             final_content = reasoning_content
 
-        return self.create_openai_response_with_reasoning(chat_id, model, final_content, reasoning_content, usage_info)
+        return self.create_openai_response_with_reasoning(
+            chat_id, model, final_content, reasoning_content, usage_info
+        )
