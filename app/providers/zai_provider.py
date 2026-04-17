@@ -82,9 +82,15 @@ def get_zai_dynamic_headers(chat_id: str = "") -> Dict[str, str]:
         # Connection/perf hints to reduce handshake overhead
         "Connection": "keep-alive",
         "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
         # UA and app-specific headers
         "User-Agent": user_agent,
         "Accept-Language": "zh-CN",
+        "DNT": "1",
+        "Priority": "u=1, i",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
         "X-FE-Version": settings.X_FE_VERSION,
         "Origin": "https://chat.z.ai",
     }
@@ -136,6 +142,14 @@ class ZAIProvider(BaseProvider):
             settings.GLM47_THINKING_MODEL: "glm-4.7",  # GLM-4.7-Thinking
             settings.GLM47_SEARCH_MODEL: "glm-4.7",  # GLM-4.7-Search
             settings.GLM5_MODEL: "glm-5",  # GLM-5
+            settings.GLM5_THINKING_MODEL: "glm-5",  # GLM-5-Thinking
+            settings.GLM5_SEARCH_MODEL: "glm-5",  # GLM-5-Search
+            settings.GLM5T_MODEL: "GLM-5-Turbo",  # GLM-5-Turbo
+            settings.GLM5T_THINKING_MODEL: "GLM-5-Turbo",  # GLM-5-Turbo-Thinking
+            settings.GLM5T_SEARCH_MODEL: "GLM-5-Turbo",  # GLM-5-Turbo-Search
+            settings.GLM51_MODEL: "GLM-5.1",  # GLM-5.1
+            settings.GLM51_THINKING_MODEL: "GLM-5.1",  # GLM-5.1-Thinking
+            settings.GLM51_SEARCH_MODEL: "GLM-5.1",  # GLM-5.1-Search
         }
 
     def _generate_uuid(self) -> str:
@@ -156,6 +170,14 @@ class ZAIProvider(BaseProvider):
             settings.GLM47_THINKING_MODEL,
             settings.GLM47_SEARCH_MODEL,
             settings.GLM5_MODEL,
+            settings.GLM5_THINKING_MODEL,
+            settings.GLM5_SEARCH_MODEL,
+            settings.GLM5T_MODEL,
+            settings.GLM5T_THINKING_MODEL,
+            settings.GLM5T_SEARCH_MODEL,
+            settings.GLM51_MODEL,
+            settings.GLM51_THINKING_MODEL,
+            settings.GLM51_SEARCH_MODEL,
         ]
 
     async def get_token(self) -> str:
@@ -299,8 +321,8 @@ class ZAIProvider(BaseProvider):
             # 语言和时区（固定）
             "language": "zh-CN",
             "languages": "zh-CN,en-US",
-            # "timezone": "Asia/Shanghai",
-            # "timezone_offset": -480,
+            "timezone": "Asia/Shanghai",
+            "timezone_offset": -480,
             # 时间（动态）
             "local_time": now.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
             "utc_time": datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S GMT"),
@@ -325,9 +347,9 @@ class ZAIProvider(BaseProvider):
             "hostname": "chat.z.ai",
             "protocol": "https:",
             "referrer": "",
-            "title": "Z.ai Chat - Free AI powered by GLM-4.7 & GLM-4.6",
+            "title": "Z.ai - Free AI Chatbot & Agent powered by GLM-5.1 & GLM-5",
             # 浏览器信息（从UA解析）
-            "user-agent": user_agent,
+            "user_agent": user_agent,
             "browser_name": browser_name,
             "os_name": os_name,
         }
@@ -344,9 +366,7 @@ class ZAIProvider(BaseProvider):
         mcp_servers: Optional[List[str]] = None,
     ) -> str:
         """为需要真实会话的模型创建上游 chat，并返回 chat_id。"""
-        init_content = (prompt or "")[:500]
-        if prompt and len(prompt) > 500:
-            init_content = init_content + "..."
+        init_content = prompt or ""
 
         message_id = user_message_id or self._generate_uuid()
         timestamp_seconds = int(time.time())
@@ -452,187 +472,176 @@ class ZAIProvider(BaseProvider):
         except Exception as e:
             self.logger.warning(f"⚠️ 删除上游 chat 异常: {e}")
 
-    def _build_glm47_completion_body(
-        self,
-        model: str,
-        messages: List[Dict[str, Any]],
-        prompt: str,
-        chat_id: str,
-        requested_model: str,
-        enable_thinking: bool,
-        web_search: bool,
-        mcp_servers: List[str],
-        current_user_message_id: str,
-        current_user_message_parent_id: Optional[str],
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        tools: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
-        """构建 GLM-4.7 专用 completions 请求体。"""
-        body = {
-            "stream": True,
-            "model": model,
-            "messages": messages,
-            "signature_prompt": prompt,
-            "params": {},
-            "extra": {},
-            "features": {
-                "image_generation": False,
-                "web_search": web_search,
-                "auto_web_search": web_search,
-                "preview_mode": True,
-                "flags": [],
-                "enable_thinking": enable_thinking,
-            },
-            "background_tasks": {
-                "title_generation": False,
-                "tags_generation": False,
-            },
-            "mcp_servers": mcp_servers,
-            "variables": {
-                "{{USER_NAME}}": "Guest",
-                "{{USER_LOCATION}}": "Unknown",
-                "{{CURRENT_DATETIME}}": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "{{CURRENT_DATE}}": datetime.now().strftime("%Y-%m-%d"),
-                "{{CURRENT_TIME}}": datetime.now().strftime("%H:%M:%S"),
-                "{{CURRENT_WEEKDAY}}": datetime.now().strftime("%A"),
-                "{{CURRENT_TIMEZONE}}": "Asia/Shanghai",
-                "{{USER_LANGUAGE}}": "zh-CN",
-            },
-            "chat_id": chat_id,
-            "id": self._generate_uuid(),
-            "current_user_message_id": current_user_message_id,
-            "current_user_message_parent_id": current_user_message_parent_id,
-        }
-
-        if tools:
-            body["tools"] = tools
-        else:
-            body["tools"] = None
-
-        if temperature is not None:
-            body["params"]["temperature"] = temperature
-        if max_tokens is not None:
-            body["params"]["max_tokens"] = max_tokens
-
-        return body
-
     async def transform_request(self, request: OpenAIRequest) -> Dict[str, Any]:
         """转换OpenAI请求为Z.AI格式"""
         self.logger.info(f"🔄 转换 OpenAI 请求到 Z.AI 格式: {request.model}")
+        original_messages = list(request.messages)
+        requested_model = request.model
+        requested_model_casefold = requested_model.casefold()
+        requested_thinking_enable = (
+            isinstance(request.thinking, dict)
+            and request.thinking.get("type") == "enabled"
+        )
+        is_anthropic_messages = any(
+            isinstance(msg.content, list) for msg in original_messages
+        )
+        is_search = "-search" in requested_model_casefold
+        is_thinking = (
+            is_anthropic_messages
+            or requested_thinking_enable
+            or ("-thinking" in requested_model_casefold)
+        )
 
-        # 0. 将输入的openai格式messages合并为1条role消息，多条消息内容按角色拼接
+        def _extract_visible_text(content: Any) -> str:
+            if isinstance(content, str):
+                return content
+            if isinstance(content, list):
+                text_parts = []
+                for part in content:
+                    if (
+                        hasattr(part, "type")
+                        and part.type == "text"
+                        and hasattr(part, "text")
+                        and part.text
+                    ):
+                        text_parts.append(part.text)
+                    elif isinstance(part, str):
+                        text_parts.append(part)
+                return "".join(text_parts)
+            if content is None:
+                return ""
+            return str(content)
+
+        def _extract_reasoning_and_content(msg: Message) -> tuple[str, str]:
+            content_text = _extract_visible_text(msg.content)
+            reasoning_text = (msg.reasoning_content or "").strip()
+
+            if (
+                not reasoning_text
+                and "<think>" in content_text
+                and "</think>" in content_text
+            ):
+                think_start = content_text.find("<think>")
+                think_end = content_text.find("</think>", think_start)
+                if think_end != -1:
+                    reasoning_text = content_text[
+                        think_start + len("<think>") : think_end
+                    ].strip()
+                    content_text = content_text[think_end + len("</think>") :].lstrip()
+
+            return reasoning_text, content_text
+
+        def _render_tool_calls(tool_calls: Any) -> str:
+            if not tool_calls:
+                return ""
+
+            rendered_calls = []
+            for tool_call in tool_calls:
+                function_call = tool_call
+                if isinstance(tool_call, dict) and tool_call.get("function"):
+                    function_call = tool_call["function"]
+
+                if isinstance(function_call, dict):
+                    tool_name = function_call.get("name", "")
+                    arguments = function_call.get("arguments", {})
+                else:
+                    tool_name = getattr(function_call, "name", "")
+                    arguments = getattr(function_call, "arguments", {})
+
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments)
+                    except (TypeError, ValueError):
+                        arguments = {"arguments": arguments}
+                if not isinstance(arguments, dict):
+                    arguments = {"arguments": arguments}
+
+                arg_parts = []
+                for key, value in arguments.items():
+                    if isinstance(value, str):
+                        arg_value = value
+                    else:
+                        arg_value = json.dumps(value, ensure_ascii=False)
+                    arg_parts.append(
+                        f"<arg_key>{key}</arg_key><arg_value>{arg_value}</arg_value>"
+                    )
+
+                rendered_calls.append(
+                    f"<tool_call>{tool_name}{''.join(arg_parts)}</tool_call>"
+                )
+
+            return "\n".join(rendered_calls)
+
+        def _extract_tool_responses(content: Any) -> List[str]:
+            if isinstance(content, str):
+                return [content]
+            if isinstance(content, list):
+                responses = []
+                for item in content:
+                    if hasattr(item, "output") and item.output is not None:
+                        responses.append(str(item.output))
+                    elif isinstance(item, dict) and item.get("output") is not None:
+                        responses.append(str(item["output"]))
+                    elif item is not None:
+                        responses.append(str(item))
+                return responses
+            if content is None:
+                return []
+            return [str(content)]
+
+        def _get_user_message_content(messages: List[Message]) -> str:
+            if not messages:
+                return ""
+
+            last_message = messages[-1]
+            if isinstance(last_message.content, str):
+                return last_message.content
+            if isinstance(last_message.content, list):
+                for part in reversed(last_message.content):
+                    if (
+                        hasattr(part, "type")
+                        and part.type == "text"
+                        and hasattr(part, "text")
+                    ):
+                        return part.text or ""
+            return ""
+
+        def _serialize_messages(messages: List[Message]) -> List[Dict[str, Any]]:
+            serialized_messages = []
+            for msg in messages:
+                if isinstance(msg.content, str):
+                    serialized_messages.append(
+                        {"role": msg.role, "content": msg.content}
+                    )
+                elif isinstance(msg.content, list):
+                    content_parts = []
+                    for part in msg.content:
+                        if hasattr(part, "type") and hasattr(part, "text"):
+                            content_parts.append({"type": part.type, "text": part.text})
+                    serialized_messages.append(
+                        {"role": msg.role, "content": content_parts}
+                    )
+            return serialized_messages
+
+        # 0. 按 Z.AI 模板将 OpenAI messages 压平成单条 user 消息。
         if request.messages:
-
-            def _extract_visible_text(content: Any) -> str:
-                if isinstance(content, str):
-                    return content
-                if isinstance(content, list):
-                    text_parts = []
-                    for part in content:
-                        if (
-                            hasattr(part, "type")
-                            and part.type == "text"
-                            and hasattr(part, "text")
-                            and part.text
-                        ):
-                            text_parts.append(part.text)
-                        elif isinstance(part, str):
-                            text_parts.append(part)
-                    return "\n".join(text_parts)
-                if content is None:
-                    return ""
-                return str(content)
-
-            def _extract_reasoning_and_content(msg: Message) -> tuple[str, str]:
-                content_text = _extract_visible_text(msg.content)
-                reasoning_text = (msg.reasoning_content or "").strip()
-
-                if (
-                    not reasoning_text
-                    and "<think>" in content_text
-                    and "</think>" in content_text
-                ):
-                    think_start = content_text.find("<think>")
-                    think_end = content_text.find("</think>", think_start)
-                    if think_end != -1:
-                        reasoning_text = content_text[
-                            think_start + len("<think>") : think_end
-                        ].strip()
-                        content_text = content_text[
-                            think_end + len("</think>") :
-                        ].lstrip()
-
-                return reasoning_text, content_text
-
-            def _serialize_tool_calls(tool_calls: Any) -> str:
-                if not tool_calls:
-                    return ""
-
-                serialized_calls = []
-                for tool_call in tool_calls:
-                    function_call = (
-                        tool_call.get("function", tool_call)
-                        if isinstance(tool_call, dict)
-                        else tool_call
-                    )
-                    name = ""
-                    arguments = {}
-
-                    if isinstance(function_call, dict):
-                        name = function_call.get("name", "")
-                        arguments = function_call.get("arguments", {})
-                    else:
-                        name = getattr(function_call, "name", "")
-                        arguments = getattr(function_call, "arguments", {})
-
-                    if isinstance(arguments, str):
-                        try:
-                            arguments = json.loads(arguments)
-                        except (TypeError, ValueError):
-                            arguments = {"arguments": arguments}
-                    elif arguments is None:
-                        arguments = {}
-
-                    arg_parts = []
-                    if isinstance(arguments, dict):
-                        for key, value in arguments.items():
-                            arg_value = (
-                                value
-                                if isinstance(value, str)
-                                else json.dumps(value, ensure_ascii=False)
-                            )
-                            arg_parts.append(
-                                f"<arg_key>{key}</arg_key><arg_value>{arg_value}</arg_value>"
-                            )
-                    else:
-                        raw_arguments = (
-                            arguments
-                            if isinstance(arguments, str)
-                            else json.dumps(arguments, ensure_ascii=False)
-                        )
-                        arg_parts.append(
-                            f"<arg_key>arguments</arg_key><arg_value>{raw_arguments}</arg_value>"
-                        )
-
-                    serialized_calls.append(
-                        f"<tool_call>{name}{''.join(arg_parts)}</tool_call>"
-                    )
-
-                return "\n".join(serialized_calls)
+            last_user_index = -1
+            for index, msg in enumerate(original_messages):
+                if (msg.role or "") == "user":
+                    last_user_index = index
 
             merged_message_parts = []
             previous_role = None
-            for msg in request.messages:
+            for index, msg in enumerate(original_messages):
                 role = msg.role or "user"
                 if role == "tool":
-                    tool_content = _extract_visible_text(msg.content).strip()
                     tool_message_parts = []
                     if previous_role != "tool":
                         tool_message_parts.append("<|observation|>")
-                    tool_message_parts.append(
-                        f"<tool_response>{tool_content}</tool_response>"
-                    )
+                    for tool_response in _extract_tool_responses(msg.content):
+                        tool_message_parts.append(
+                            f"<tool_response>{tool_response}</tool_response>"
+                        )
                     merged_message_parts.append(
                         "\n".join(part for part in tool_message_parts if part).rstrip()
                     )
@@ -642,22 +651,30 @@ class ZAIProvider(BaseProvider):
                 reasoning_content, content_text = _extract_reasoning_and_content(msg)
                 message_body_parts = []
 
-                ## 是否填充think部分
-                # if reasoning_content:
-                #     message_body_parts.append(f"<think>\n{reasoning_content}\n</think>")
+                if role == "assistant":
+                    keep_reasoning = reasoning_content and index > last_user_index
+                    if keep_reasoning:
+                        message_body_parts.append(
+                            f"<think>{reasoning_content.strip()}</think>"
+                        )
+                    else:
+                        message_body_parts.append("</think>")
 
                 if content_text.strip():
                     message_body_parts.append(content_text.strip())
 
-                tool_calls_text = ""
                 if role == "assistant":
-                    tool_calls_text = _serialize_tool_calls(msg.tool_calls)
+                    tool_calls_text = _render_tool_calls(msg.tool_calls)
                     if tool_calls_text:
                         message_body_parts.append(tool_calls_text)
 
                 message_body = "\n".join(part for part in message_body_parts if part)
                 merged_message_parts.append(f"<|{role}|>\n{message_body}".rstrip())
                 previous_role = role
+
+            # 末尾补 assistant 前缀，显式告诉上游从 assistant 继续生成。
+            generation_suffix = "<think>" if is_thinking else "</think>"
+            merged_message_parts.append(f"<|assistant|>{generation_suffix}")
 
             merged_messages_content = "\n".join(
                 part for part in merged_message_parts if part
@@ -679,21 +696,8 @@ class ZAIProvider(BaseProvider):
             }
         self._current_token = token
 
-        # 2. 获取用于签名的用户消息
-        user_message_content = ""
-        if request.messages:
-            last_message = request.messages[-1]
-            if isinstance(last_message.content, str):
-                user_message_content = last_message.content
-            elif isinstance(last_message.content, list):
-                for part in reversed(last_message.content):
-                    if (
-                        hasattr(part, "type")
-                        and part.type == "text"
-                        and hasattr(part, "text")
-                    ):
-                        user_message_content = part.text
-                        break
+        # 2. 提取签名和上游建会话所需的用户消息文本。
+        user_message_content = _get_user_message_content(request.messages)
         if not user_message_content:
             self.logger.warning(
                 "⚠️ 无法从请求中找到用户消息内容用于签名，将使用空字符串"
@@ -745,40 +749,12 @@ class ZAIProvider(BaseProvider):
             **browser_params,
         }
 
-        # 6. 处理消息格式
-        messages = []
-        for msg in request.messages:
-            if isinstance(msg.content, str):
-                messages.append({"role": msg.role, "content": msg.content})
-            elif isinstance(msg.content, list):
-                # 处理多模态内容
-                content_parts = []
-                for part in msg.content:
-                    if hasattr(part, "type") and hasattr(part, "text"):
-                        content_parts.append({"type": part.type, "text": part.text})
-                messages.append({"role": msg.role, "content": content_parts})
+        # 6. 将消息转换为上游请求体可直接使用的格式。
+        messages = _serialize_messages(request.messages)
 
-        # 7. 确定模型特性和上游模型ID
-        requested_model = request.model
-        is_search = "-search" in requested_model.casefold()
-        # 判断思考模式，如果body中的messages中的content是list，就开启思考。
-        is_anthropic_messages = any(
-            isinstance(msg.content, list) for msg in request.messages
-        )
+        # 7. 计算模型特性和上游模型 ID。
         if is_anthropic_messages:
             self.logger.info(f"content为List，开启思考： {is_anthropic_messages}")
-        # 正常判断，body中带thinking或者模型名带-thinking
-        requested_thinking_enable = (
-            isinstance(request.thinking, dict)
-            and request.thinking.get("type") == "enabled"
-        )
-        is_thinking = (
-            is_anthropic_messages
-            or requested_thinking_enable
-            or ("-thinking" in requested_model.casefold())
-        )
-
-        # 获取上游模型ID
         upstream_model_id = self.model_mapping.get(requested_model, "0727-360B-API")
 
         # 8. 构建MCP服务器列表
@@ -787,33 +763,28 @@ class ZAIProvider(BaseProvider):
             mcp_servers.append("deep-web-search")
             self.logger.info("🔍 检测到搜索模型，添加 deep-web-search MCP 服务器")
 
-        # 9. 构建上游请求体
+        # 9. 先创建真实上游会话，再构造 completions 请求体。
         current_user_message_id = self._generate_uuid()
-        requires_real_chat = upstream_model_id in {"glm-4.7", "glm-5", "GLM-4-6-API-V1"}
         self.logger.debug(
             f"请求模型：{requested_model}，上游模型ID：{upstream_model_id}，思考模式：{is_thinking}，搜索模式：{is_search}"
         )
-        if requires_real_chat:
-            chat_id = await self._create_upstream_chat(
-                prompt=user_message_content or "",
-                model=upstream_model_id,
-                token=token,
-                headers=headers,
-                enable_thinking=is_thinking,
-                web_search=is_search,
-                user_message_id=current_user_message_id,
-                mcp_servers=mcp_servers,
-            )
-            headers["Referer"] = f"{self.base_url}/c/{chat_id}"
-            params["current_url"] = f"{self.base_url}/c/{chat_id}"
-            params["pathname"] = f"/c/{chat_id}"
-            current_user_message_parent_id = None
-            self.logger.info(
-                f"已创建真实聊天会话，模型：{upstream_model_id}，ChatID：{chat_id}"
-            )
-        else:
-            chat_id = self._generate_uuid()
-            current_user_message_parent_id = self._generate_uuid()
+        chat_id = await self._create_upstream_chat(
+            prompt=user_message_content or "",
+            model=upstream_model_id,
+            token=token,
+            headers=headers,
+            enable_thinking=is_thinking,
+            web_search=is_search,
+            user_message_id=current_user_message_id,
+            mcp_servers=mcp_servers,
+        )
+        headers["Referer"] = f"{self.base_url}/c/{chat_id}"
+        params["current_url"] = f"{self.base_url}/c/{chat_id}"
+        params["pathname"] = f"/c/{chat_id}"
+        current_user_message_parent_id = None
+        self.logger.info(
+            f"已创建真实聊天会话，模型：{upstream_model_id}，ChatID：{chat_id}"
+        )
 
         tools = (
             request.tools
@@ -823,87 +794,56 @@ class ZAIProvider(BaseProvider):
         if tools:
             self.logger.info(f"启用工具支持: {len(tools)} 个工具")
 
-        if upstream_model_id == "glm-4.7":
-            body = self._build_glm47_completion_body(
-                model=upstream_model_id,
-                messages=messages,
-                prompt=user_message_content or "",
-                chat_id=chat_id,
-                requested_model=requested_model,
-                enable_thinking=is_thinking,
-                web_search=is_search,
-                mcp_servers=mcp_servers,
-                current_user_message_id=current_user_message_id,
-                current_user_message_parent_id=current_user_message_parent_id,
-                temperature=request.temperature,
-                max_tokens=request.max_tokens,
-                tools=tools,
-            )
+        body = {
+            "stream": True,  # 总是使用流式
+            "model": upstream_model_id,
+            "messages": messages,
+            "signature_prompt": user_message_content,
+            "params": {},
+            "extra": {},
+            "features": {
+                "image_generation": False,
+                "web_search": is_search,
+                "auto_web_search": is_search,
+                "preview_mode": True,
+                "flags": [],
+                "vlm_tools_enable": False,
+                "vlm_web_search_enable": False,
+                "vlm_website_mode": False,
+                "enable_thinking": is_thinking,
+            },
+            "background_tasks": {
+                "title_generation": False,
+                "tags_generation": False,
+            },
+            "mcp_servers": mcp_servers,
+            "variables": {
+                "{{USER_NAME}}": "ProUltra",
+                "{{USER_LOCATION}}": "Unknown",
+                "{{CURRENT_DATETIME}}": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "{{CURRENT_DATE}}": datetime.now().strftime("%Y-%m-%d"),
+                "{{CURRENT_TIME}}": datetime.now().strftime("%H:%M:%S"),
+                "{{CURRENT_WEEKDAY}}": datetime.now().strftime("%A"),
+                "{{CURRENT_TIMEZONE}}": "Asia/Shanghai",
+                "{{USER_LANGUAGE}}": "zh-CN",
+            },
+            "chat_id": chat_id,
+            "id": self._generate_uuid(),
+            "current_user_message_id": current_user_message_id,
+            "current_user_message_parent_id": current_user_message_parent_id,
+        }
+
+        if tools:
+            body["tools"] = tools
         else:
-            body = {
-                "stream": True,  # 总是使用流式
-                "model": upstream_model_id,
-                "messages": messages,
-                "signature_prompt": user_message_content,
-                "params": {},
-                "features": {
-                    "image_generation": False,
-                    "web_search": is_search,
-                    "auto_web_search": is_search,
-                    "preview_mode": True,
-                    "flags": [],
-                    # "features": [
-                    #     {"type": "mcp", "server": "vibe-coding", "status": "hidden"},
-                    #     {"type": "mcp", "server": "ppt-maker", "status": "hidden"},
-                    #     {"type": "mcp", "server": "image-search", "status": "hidden"},
-                    #     {"type": "mcp", "server": "deep-research", "status": "hidden"},
-                    #     {"type": "tool_selector", "server": "tool_selector", "status": "hidden"},
-                    #     {"type": "mcp", "server": "advanced-search", "status": "hidden"},
-                    # ],
-                    "enable_thinking": is_thinking,
-                },
-                "background_tasks": {
-                    "title_generation": False,
-                    "tags_generation": False,
-                },
-                "mcp_servers": mcp_servers,
-                "variables": {
-                    "{{USER_NAME}}": "Guest",
-                    "{{USER_LOCATION}}": "Unknown",
-                    "{{CURRENT_DATETIME}}": datetime.now().strftime(
-                        "%Y-%m-%d %H:%M:%S"
-                    ),
-                    "{{CURRENT_DATE}}": datetime.now().strftime("%Y-%m-%d"),
-                    "{{CURRENT_TIME}}": datetime.now().strftime("%H:%M:%S"),
-                    "{{CURRENT_WEEKDAY}}": datetime.now().strftime("%A"),
-                    "{{CURRENT_TIMEZONE}}": "Asia/Shanghai",
-                    "{{USER_LANGUAGE}}": "zh-CN",
-                },
-                "model_item": {
-                    "id": upstream_model_id,
-                    "name": requested_model,
-                    "owned_by": "z.ai",
-                },
-                "chat_id": chat_id,
-                "id": self._generate_uuid(),
-                "current_user_message_id": current_user_message_id,
-                "current_user_message_parent_id": current_user_message_parent_id,
-            }
+            body["tools"] = None
 
-            if tools:
-                body["tools"] = tools
-            else:
-                body["tools"] = None
+        if request.temperature is not None:
+            body["params"]["temperature"] = request.temperature
+        if request.max_tokens is not None:
+            body["params"]["max_tokens"] = request.max_tokens
 
-            if request.temperature is not None:
-                body["params"]["temperature"] = request.temperature
-            if request.max_tokens is not None:
-                body["params"]["max_tokens"] = request.max_tokens
-
-        # 9. 返回转换后的请求对象
-        # 存储当前token用于错误处理
-        self._current_token = token
-        # 日志输出：格式化的json
+        # 10. 返回转换后的请求对象。
         self.logger.debug(
             f"转换后的请求头:\n {json.dumps(headers, ensure_ascii=False, indent=2)}"
         )
@@ -921,7 +861,6 @@ class ZAIProvider(BaseProvider):
             "token": token,
             "chat_id": chat_id,
             "model": requested_model,
-            "should_delete_chat": requires_real_chat,
         }
 
     @staticmethod
@@ -976,7 +915,7 @@ class ZAIProvider(BaseProvider):
                     # transform_response 知道如何处理上游的流并聚合成单个响应
                     return await self.transform_response(response, request, transformed)
                 finally:
-                    if transformed.get("should_delete_chat"):
+                    if settings.AUTO_DELETE_UPSTREAM_CHAT:
                         await self._delete_upstream_chat(
                             transformed.get("chat_id", ""),
                             transformed.get("token", ""),
@@ -998,6 +937,15 @@ class ZAIProvider(BaseProvider):
     ) -> AsyncGenerator[str, None]:
         """流式响应生成器"""
         current_token = transformed.get("token", "")
+
+        async def _cleanup_upstream_chat() -> None:
+            if not settings.AUTO_DELETE_UPSTREAM_CHAT:
+                return
+            await self._delete_upstream_chat(
+                transformed.get("chat_id", ""),
+                transformed.get("token", ""),
+                transformed.get("headers", {}),
+            )
 
         try:
             async with httpx.AsyncClient(
@@ -1029,12 +977,7 @@ class ZAIProvider(BaseProvider):
                         }
                         yield f"data: {json.dumps(error_response)}\n\n"
                         yield "data: [DONE]\n\n"
-                        if transformed.get("should_delete_chat"):
-                            await self._delete_upstream_chat(
-                                transformed.get("chat_id", ""),
-                                transformed.get("token", ""),
-                                transformed.get("headers", {}),
-                            )
+                        await _cleanup_upstream_chat()
                         return
 
                     # 标记token使用成功（如果不是匿名模式）
@@ -1050,12 +993,7 @@ class ZAIProvider(BaseProvider):
                         response, chat_id, model, transformed
                     ):
                         yield chunk
-                    if transformed.get("should_delete_chat"):
-                        await self._delete_upstream_chat(
-                            transformed.get("chat_id", ""),
-                            transformed.get("token", ""),
-                            transformed.get("headers", {}),
-                        )
+                    await _cleanup_upstream_chat()
                     return
 
         except Exception as e:
@@ -1068,12 +1006,7 @@ class ZAIProvider(BaseProvider):
             if current_token and not settings.ANONYMOUS_MODE:
                 self.mark_token_failure(current_token, e)
 
-            if transformed.get("should_delete_chat"):
-                await self._delete_upstream_chat(
-                    transformed.get("chat_id", ""),
-                    transformed.get("token", ""),
-                    transformed.get("headers", {}),
-                )
+            await _cleanup_upstream_chat()
 
             # 返回错误
             error_response = {"error": {"message": str(e), "type": "stream_error"}}

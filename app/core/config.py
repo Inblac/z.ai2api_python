@@ -18,9 +18,15 @@ class Settings(BaseSettings):
     AUTH_TOKENS_FILE: Optional[str] = os.getenv("AUTH_TOKENS_FILE")
 
     # Token池配置
-    TOKEN_HEALTH_CHECK_INTERVAL: int = int(os.getenv("TOKEN_HEALTH_CHECK_INTERVAL", "300"))  # 5分钟
-    TOKEN_FAILURE_THRESHOLD: int = int(os.getenv("TOKEN_FAILURE_THRESHOLD", "3"))  # 失败3次后标记为不可用
-    TOKEN_RECOVERY_TIMEOUT: int = int(os.getenv("TOKEN_RECOVERY_TIMEOUT", "1800"))  # 30分钟后重试失败的token
+    TOKEN_HEALTH_CHECK_INTERVAL: int = int(
+        os.getenv("TOKEN_HEALTH_CHECK_INTERVAL", "300")
+    )  # 5分钟
+    TOKEN_FAILURE_THRESHOLD: int = int(
+        os.getenv("TOKEN_FAILURE_THRESHOLD", "3")
+    )  # 失败3次后标记为不可用
+    TOKEN_RECOVERY_TIMEOUT: int = int(
+        os.getenv("TOKEN_RECOVERY_TIMEOUT", "1800")
+    )  # 30分钟后重试失败的token
 
     def _load_tokens_from_file(self, file_path: str) -> List[str]:
         """
@@ -34,7 +40,7 @@ class Settings(BaseSettings):
         tokens = []
         try:
             if os.path.exists(file_path):
-                with open(file_path, 'r', encoding='utf-8') as f:
+                with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read().strip()
 
                     if not content:
@@ -43,18 +49,18 @@ class Settings(BaseSettings):
 
                     # 智能解析：同时支持换行和逗号分隔
                     # 1. 先按换行符分割处理每一行
-                    lines = content.split('\n')
+                    lines = content.split("\n")
 
                     for line in lines:
                         line = line.strip()
                         # 跳过空行和注释行
-                        if not line or line.startswith('#'):
+                        if not line or line.startswith("#"):
                             continue
 
                         # 2. 检查当前行是否包含逗号分隔
-                        if ',' in line:
+                        if "," in line:
                             # 按逗号分割当前行
-                            comma_tokens = line.split(',')
+                            comma_tokens = line.split(",")
                             for token in comma_tokens:
                                 token = token.strip()
                                 if token:  # 跳过空token
@@ -130,7 +136,9 @@ class Settings(BaseSettings):
             # 记录去重信息
             duplicate_count = len(tokens) - len(unique_tokens)
             if duplicate_count > 0:
-                logger.warning(f"⚠️ 检测到 {duplicate_count} 个重复LongCat token，已自动去重")
+                logger.warning(
+                    f"⚠️ 检测到 {duplicate_count} 个重复LongCat token，已自动去重"
+                )
 
             return unique_tokens
 
@@ -148,7 +156,16 @@ class Settings(BaseSettings):
     GLM47_THINKING_MODEL: str = os.getenv("GLM47_THINKING_MODEL", "GLM-4.7-Thinking")
     GLM47_SEARCH_MODEL: str = os.getenv("GLM47_SEARCH_MODEL", "GLM-4.7-Search")
     GLM5_MODEL: str = os.getenv("GLM5_MODEL", "GLM-5")
-
+    GLM5_THINKING_MODEL: str = os.getenv("GLM5_THINKING_MODEL", "GLM-5-Thinking")
+    GLM5_SEARCH_MODEL: str = os.getenv("GLM5_SEARCH_MODEL", "GLM-5-Search")
+    GLM5T_MODEL: str = os.getenv("GLM5T_MODEL", "GLM-5-Turbo")
+    GLM5T_THINKING_MODEL: str = os.getenv(
+        "GLM5T_THINKING_MODEL", "GLM-5-Turbo-Thinking"
+    )
+    GLM5T_SEARCH_MODEL: str = os.getenv("GLM5T_SEARCH_MODEL", "GLM-5-Turbo-Search")
+    GLM51_MODEL: str = os.getenv("GLM51_MODEL", "GLM-5.1")
+    GLM51_THINKING_MODEL: str = os.getenv("GLM51_THINKING_MODEL", "GLM-5.1-Thinking")
+    GLM51_SEARCH_MODEL: str = os.getenv("GLM51_SEARCH_MODEL", "GLM-5.1-Search")
 
     # Provider Model Mapping
     @property
@@ -167,7 +184,14 @@ class Settings(BaseSettings):
             "GLM-4.7-Thinking": "zai",
             "GLM-4.7-Search": "zai",
             "GLM-5": "zai",
-
+            "GLM-5-Thinking": "zai",
+            "GLM-5-Search": "zai",
+            "GLM-5-Turbo": "zai",
+            "GLM-5-Turbo-Thinking": "zai",
+            "GLM-5-Turbo-Search": "zai",
+            "GLM-5.1": "zai",
+            "GLM-5.1-Thinking": "zai",
+            "GLM-5.1-Search": "zai",
             # K2Think models
             "MBZUAI-IFM/K2-Think": "k2think",
             # LongCat models
@@ -185,9 +209,13 @@ class Settings(BaseSettings):
     TOOL_SUPPORT: bool = os.getenv("TOOL_SUPPORT", "true").lower() == "true"
     SCAN_LIMIT: int = int(os.getenv("SCAN_LIMIT", "200000"))
     SKIP_AUTH_TOKEN: bool = os.getenv("SKIP_AUTH_TOKEN", "false").lower() == "true"
-    
+
     # 是否使用客户端传递的 api_key 作为 Z.AI 认证 token
     USE_CLIENT_TOKEN: bool = os.getenv("USE_CLIENT_TOKEN", "false").lower() == "true"
+    # 请求结束后是否自动删除 Z.AI 上游会话
+    AUTO_DELETE_UPSTREAM_CHAT: bool = (
+        os.getenv("AUTO_DELETE_UPSTREAM_CHAT", "true").lower() == "true"
+    )
 
     # LongCat Configuration
     LONGCAT_PASSPORT_TOKEN: Optional[str] = os.getenv("LONGCAT_PASSPORT_TOKEN")
@@ -195,10 +223,9 @@ class Settings(BaseSettings):
 
     # Z.AI Signature Configuration
     ZAI_SIGNATURE_KEY: str = os.getenv("ZAI_SIGNATURE_KEY", "junjie")
-    
+
     # X-FE-Version Header
     X_FE_VERSION: str = os.getenv("X_FE_VERSION", "prod-fe-1.0.106")
-
 
     class Config:
         env_file = ".env"
