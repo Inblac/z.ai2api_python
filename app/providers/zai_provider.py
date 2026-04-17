@@ -443,6 +443,9 @@ class ZAIProvider(BaseProvider):
     ) -> None:
         """删除已创建的上游 chat。"""
         if not chat_id or not token:
+            self.logger.warning(
+                f"跳过删除上游 chat，参数缺失: chat_id={chat_id or '空'}, token={'有' if token else '空'}"
+            )
             return
 
         request_headers = {
@@ -450,8 +453,18 @@ class ZAIProvider(BaseProvider):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}",
             "User-Agent": headers.get("User-Agent", ""),
-            "Accept-Language": headers.get("Accept-Language", "zh-CN"),
+            "Accept-Language": headers.get(
+                "Accept-Language", "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7"
+            ),
             "Cache-Control": "no-cache",
+            "DNT": headers.get("DNT", "1"),
+            "Priority": headers.get("Priority", "u=1, i"),
+            "sec-ch-ua": headers.get("sec-ch-ua", ""),
+            "sec-ch-ua-mobile": headers.get("sec-ch-ua-mobile", "?0"),
+            "sec-ch-ua-platform": headers.get("sec-ch-ua-platform", '"Windows"'),
+            "Sec-Fetch-Dest": headers.get("Sec-Fetch-Dest", "empty"),
+            "Sec-Fetch-Mode": headers.get("Sec-Fetch-Mode", "cors"),
+            "Sec-Fetch-Site": headers.get("Sec-Fetch-Site", "same-origin"),
             "Origin": self.base_url,
             "Referer": f"{self.base_url}/c/{chat_id}",
         }
@@ -921,6 +934,10 @@ class ZAIProvider(BaseProvider):
                             transformed.get("token", ""),
                             transformed.get("headers", {}),
                         )
+                    else:
+                        self.logger.warning(
+                            f"保留上游 chat，未自动删除: {transformed.get('chat_id', '')}"
+                        )
 
         except Exception as e:
             self.log_response(False, str(e))
@@ -937,9 +954,17 @@ class ZAIProvider(BaseProvider):
     ) -> AsyncGenerator[str, None]:
         """流式响应生成器"""
         current_token = transformed.get("token", "")
+        cleanup_done = False
 
         async def _cleanup_upstream_chat() -> None:
+            nonlocal cleanup_done
+            if cleanup_done:
+                return
+            cleanup_done = True
             if not settings.AUTO_DELETE_UPSTREAM_CHAT:
+                self.logger.warning(
+                    f"保留上游 chat，未自动删除: {transformed.get('chat_id', '')}"
+                )
                 return
             await self._delete_upstream_chat(
                 transformed.get("chat_id", ""),
@@ -993,7 +1018,6 @@ class ZAIProvider(BaseProvider):
                         response, chat_id, model, transformed
                     ):
                         yield chunk
-                    await _cleanup_upstream_chat()
                     return
 
         except Exception as e:
@@ -1013,6 +1037,8 @@ class ZAIProvider(BaseProvider):
             yield f"data: {json.dumps(error_response)}\n\n"
             yield "data: [DONE]\n\n"
             return
+        finally:
+            await _cleanup_upstream_chat()
 
     async def transform_response(
         self,
