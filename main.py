@@ -1,9 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import os
 import sys
-import psutil
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,7 +10,6 @@ from app.core.config import settings
 from app.core import openai
 from app.utils.reload_config import RELOAD_CONFIG
 from app.utils.logger import setup_logger
-from app.utils.token_pool import initialize_token_pool
 from app.providers import initialize_providers
 
 from granian import Granian
@@ -26,15 +23,6 @@ logger = setup_logger(log_dir="logs", debug_mode=settings.DEBUG_LOGGING)
 async def lifespan(app: FastAPI):
     # 初始化提供商系统
     initialize_providers()
-
-    # 初始化 token 池
-    token_list = settings.auth_token_list
-    if token_list:
-        token_pool = initialize_token_pool(
-            tokens=token_list,
-            failure_threshold=settings.TOKEN_FAILURE_THRESHOLD,
-            recovery_timeout=settings.TOKEN_RECOVERY_TIMEOUT,
-        )
 
     yield
 

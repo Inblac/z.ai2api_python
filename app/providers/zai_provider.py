@@ -20,7 +20,6 @@ from app.providers.base import BaseProvider, ProviderConfig
 from app.models.schemas import OpenAIRequest, Message
 from app.core.config import settings
 from app.utils.logger import get_logger
-from app.utils.token_pool import get_token_pool
 from app.utils.user_agent import get_random_user_agent
 from app.utils.sse_tool_handler import SSEToolHandler
 
@@ -208,27 +207,8 @@ class ZAIProvider(BaseProvider):
             self.logger.error("❌ 匿名模式下获取访客令牌失败")
             return ""
 
-        # 非匿名模式：首先使用token池获取备份令牌
-        token_pool = get_token_pool()
-        if token_pool:
-            token = token_pool.get_next_token()
-            if token:
-                self.logger.debug(f"从token池获取令牌: {token[:20]}...")
-                return token
-
         self.logger.error("❌ 无法获取有效的认证令牌")
         return ""
-
-    def mark_token_failure(self, token: str, error: Optional[Exception] = None):
-        """标记token使用失败"""
-        token_pool = get_token_pool()
-        if token_pool:
-            error_to_report = (
-                error
-                if error is not None
-                else Exception("Token failure reported without specific error")
-            )
-            token_pool.mark_token_failure(token, error_to_report)
 
     def _generate_signature_params(
         self, token: str, user_message: Optional[str]
@@ -707,7 +687,6 @@ class ZAIProvider(BaseProvider):
                 "chat_id": "no-chat-id",
                 "model": request.model,
             }
-        self._current_token = token
 
         # 2. 提取签名和上游建会话所需的用户消息文本。
         user_message_content = _get_user_message_content(request.messages)
@@ -1005,12 +984,6 @@ class ZAIProvider(BaseProvider):
                         await _cleanup_upstream_chat()
                         return
 
-                    # 标记token使用成功（如果不是匿名模式）
-                    if current_token and not settings.ANONYMOUS_MODE:
-                        token_pool = get_token_pool()
-                        if token_pool:
-                            token_pool.mark_token_success(current_token)
-
                     # 处理流式响应
                     chat_id = transformed["chat_id"]
                     model = transformed["model"]
@@ -1025,10 +998,6 @@ class ZAIProvider(BaseProvider):
             import traceback
 
             self.logger.error(traceback.format_exc())
-
-            # 标记token失败（如果不是匿名模式）
-            if current_token and not settings.ANONYMOUS_MODE:
-                self.mark_token_failure(current_token, e)
 
             await _cleanup_upstream_chat()
 

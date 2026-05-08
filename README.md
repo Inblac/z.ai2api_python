@@ -5,12 +5,12 @@
 ![FastAPI](https://img.shields.io/badge/framework-FastAPI-009688.svg)
 [![Build and Push Docker Image](https://github.com/Inblac/z.ai2api_python/actions/workflows/docker.yml/badge.svg)](https://github.com/Inblac/z.ai2api_python/actions/workflows/docker.yml)
 
-基于 FastAPI 的高性能 OpenAI API 兼容代理服务，采用多提供商架构设计，支持 GLM-4.5 系列、K2Think、LongCat 等多种 AI 模型的完整功能。
+基于 FastAPI 的高性能 OpenAI API 兼容代理服务，采用多提供商架构设计，支持 GLM-4.5 系列等多种 AI 模型的完整功能。
 
 ## ✨ 核心特性
 
 - 🔌 **完全兼容 OpenAI API** - 无缝集成现有应用
-- 🏗️ **多提供商架构** - 支持 Z.AI、K2Think、LongCat 等多个 AI 提供商
+- 🏗️ **多提供商架构** - 支持 Z.AI 等多个 AI 提供商，易于扩展
 - 🍒 **Cherry Studio支持** - Cherry Studio 中可以直接调用 MCP 工具
 - 🚀 **高性能流式响应** - Server-Sent Events (SSE) 支持
 - 🛠️ **增强工具调用** - 改进的 Function Call 实现，支持复杂工具链
@@ -167,18 +167,6 @@ docker run -d \
 | `GLM-4.5-Search`   | 0727-360B-API | 搜索模型    | 实时网络搜索，信息更新 |
 | `GLM-4.5-Air`      | 0727-106B-API | 轻量模型    | 快速响应，高效推理     |
 
-#### K2Think 提供商
-| 模型                    | 描述           | 特性                     |
-| ----------------------- | -------------- | ------------------------ |
-| `MBZUAI-IFM/K2-Think`   | K2Think 模型   | 快速的高质量推理 |
-
-#### LongCat 提供商
-| 模型               | 描述           | 特性                     |
-| ------------------ | -------------- | ------------------------ |
-| `LongCat-Flash`    | 快速响应模型   | 高速处理，适合实时对话   |
-| `LongCat`          | 标准模型       | 平衡性能，通用场景       |
-| `LongCat-Search`   | 搜索增强模型   | 集成搜索功能，信息检索   |
-
 ## ⚙️ 配置说明
 
 ### 环境变量配置
@@ -196,12 +184,6 @@ docker run -d \
 | `AUTH_TOKENS_FILE`    | `tokens.txt`                              | Z.AI 认证token文件路径 |
 | `USE_CLIENT_TOKEN`    | `false`                                   | 使用客户端传递的 api_key 作为 Z.AI 认证 token |
 
-#### 提供商配置
-| 变量名                    | 默认值    | 说明                        |
-| ------------------------- | --------- | --------------------------- |
-| `LONGCAT_PASSPORT_TOKEN`  | -         | LongCat 单个认证token       |
-| `LONGCAT_TOKENS_FILE`     | -         | LongCat 多个token文件路径   |
-
 > 💡 详细配置请查看 `.env.example` 文件
 
 ## 🏗️ 多提供商架构
@@ -211,20 +193,6 @@ docker run -d \
 # Z.AI 认证配置
 AUTH_TOKENS_FILE=tokens.txt
 ANONYMOUS_MODE=true
-```
-
-### LongCat 提供商
-
-```bash
-# LongCat 认证配置
-LONGCAT_PASSPORT_TOKEN=your_passport_token
-# 或使用多个token文件
-LONGCAT_TOKENS_FILE=longcat_tokens.txt
-```
-
-### K2Think 提供商
-```bash
-# K2Think 自动处理认证，无需额外配置
 ```
 
 ## 🔄 Token池机制
@@ -339,12 +307,6 @@ A: 匿名模式使用临时 token，避免对话历史共享，保护隐私。
 **Q: 如何自定义配置？**  
 A: 通过环境变量配置，推荐使用 `.env` 文件。  
 
-**Q: 如何配置 LongCat 认证？**  
-A: 有两种方式配置 LongCat 认证：  
-1. 单个 token：设置 `LONGCAT_PASSPORT_TOKEN` 环境变量  
-2. 多个 token：创建 token 文件并设置 `LONGCAT_TOKENS_FILE` 环境变量  
-
-
 ## 🔑 获取 Z.ai API Token
 
 要使用完整的多模态功能，需要获取正式的 Z.ai API Token：
@@ -356,17 +318,7 @@ A: 有两种方式配置 LongCat 认证：
 
 > ❗ **重要提示**: 获取的 token 可能有时效性，多模态模型需要**官方 Z.ai API 非匿名 Token**，匿名 token 不支持多媒体处理  
 
-## 🔑 获取 LongCat API Token
-
-获取 LongCat API Token 才能正常使用该服务（官网匿名对话次数仅有一次）：
-
-1. 打开 [LongCat 官网](https://longcat.chat/)，登录自己的美团账号
-2. 按 F12 打开开发者工具
-3. 切换到 "Application" -> "Local Storage" -> "Cookie"列表中找到名为`passport_token_key`的值
-4. 复制 `passport_token_key` 值设置为环境变量
-
-
-## 🛠️ 技术栈
+## 🔑 获取 Z.ai API Token
 
 | 组件            | 技术                                                                              | 版本    | 说明                                       |
 | --------------- | --------------------------------------------------------------------------------- | ------- | ------------------------------------------ |
@@ -381,26 +333,23 @@ A: 有两种方式配置 LongCat 认证：
 ## 🏗️ 技术架构
 
 ```
-┌──────────────┐      ┌─────────────────────────────────────┐      ┌─────────────────┐
-│   OpenAI     │      │                                     │      │                 │
+┌──────────────┐      ┌───────────────────────────────────┐      ┌─────────────────┐
+│   OpenAI     │      │                                   │      │                 │
 │  Client      │────▶│         FastAPI Server             │────▶│   Z.AI API      │
-└──────────────┘      │                                     │      │                 │
-┌──────────────┐      │ ┌─────────────────────────────────┐ │      │ ┌─────────────┐ │
-│ Claude Code  │      │ │      Provider Router            │ │      │ │0727-360B-API│ │
-│   Router     │────▶│ │  ┌─────────┬─────────┬─────────┐ │ │      │ └─────────────┘ │
-└──────────────┘      │ │  │Z.AI     │K2Think  │LongCat  │ │ │      │ ┌─────────────┐ │
-                      │ │  │Provider │Provider │Provider │ │ │────▶│ │0727-106B-API│ │
-                      │ │  └─────────┴─────────┴─────────┘ │ │      │ └─────────────┘ │
-                      │ └─────────────────────────────────┘ │      │                 │
-                      │ ┌─────────────────────────────────┐ │      └─────────────────┘
-                      │ │     /v1/chat/completions        │ │      ┌─────────────────┐
-                      │ │     /v1/models                  │ │      │  K2Think API    │
-                      │ │     Enhanced Tools              │ │────▶│                 │
-                      │ └─────────────────────────────────┘ │      └─────────────────┘
-                      └─────────────────────────────────────┘      ┌─────────────────┐
-                               OpenAI Compatible API               │  LongCat API    │
-                                                                   │                 │
-                                                                   └─────────────────┘
+└──────────────┘      │                                   │      │                 │
+┌──────────────┐      │ ┌───────────────────────────────┐ │      │ ┌─────────────┐ │
+│ Claude Code  │      │ │      Provider Router          │ │      │ │0727-360B-API│ │
+│   Router     │────▶│ │  ┌──────────────────────────┐ │ │      │ └─────────────┘ │
+└──────────────┘      │ │  │       Z.AI Provider       │ │ │────▶│ ┌─────────────┐ │
+                      │ │  └──────────────────────────┘ │ │      │ │0727-106B-API│ │
+                      │ └───────────────────────────────┘ │      │ └─────────────┘ │
+                      │ ┌───────────────────────────────┐ │      └─────────────────┘
+                      │ │     /v1/chat/completions        │ │
+                      │ │     /v1/models                  │ │
+                      │ │     Enhanced Tools              │ │
+                      │ └───────────────────────────────┘ │
+                      └───────────────────────────────────┘
+                               OpenAI Compatible API
 ```
 
 ## ⭐ Star History
@@ -421,7 +370,7 @@ If you like this project, please give it a star ⭐
 
 ## ⚠️ 免责声明
 
-- 本项目与 Z.AI、K2Think、LongCat 等 AI 提供商官方无关
+- 本项目与 Z.AI 等 AI 提供商官方无关
 - 使用前请确保遵守各提供商的服务条款
 - 请勿用于商业用途或违反使用条款的场景
 - 项目仅供学习和研究使用

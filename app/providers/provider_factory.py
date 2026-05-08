@@ -10,8 +10,6 @@ import time
 from typing import Dict, List, Optional, Union, AsyncGenerator, Any
 from app.providers.base import BaseProvider, provider_registry
 from app.providers.zai_provider import ZAIProvider
-# from app.providers.k2think_provider import K2ThinkProvider
-# from app.providers.longcat_provider import LongCatProvider
 from app.models.schemas import OpenAIRequest
 from app.core.config import settings
 from app.utils.logger import get_logger
@@ -38,20 +36,6 @@ class ProviderFactory:
                 zai_provider, 
                 zai_provider.get_supported_models()
             )
-            
-            # # 注册 K2Think 提供商
-            # k2think_provider = K2ThinkProvider()
-            # provider_registry.register(
-            #     k2think_provider,
-            #     k2think_provider.get_supported_models()
-            # )
-            
-            # # 注册 LongCat 提供商
-            # longcat_provider = LongCatProvider()
-            # provider_registry.register(
-            #     longcat_provider,
-            #     longcat_provider.get_supported_models()
-            # )
             
             self._initialized = True
             
@@ -88,12 +72,6 @@ class ProviderFactory:
         
         logger.error(f"❌ 无法为模型 {model} 找到任何提供商")
         return None
-    
-    def list_supported_models(self) -> List[str]:
-        """列出所有支持的模型"""
-        if not self._initialized:
-            self.initialize()
-        return provider_registry.list_models()
     
     def list_providers(self) -> List[str]:
         """列出所有提供商"""

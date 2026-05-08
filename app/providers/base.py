@@ -8,12 +8,11 @@
 
 import json
 import time
-import uuid
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Optional, AsyncGenerator, Union
 from dataclasses import dataclass
 
-from app.models.schemas import OpenAIRequest, Message
+from app.models.schemas import OpenAIRequest
 from app.utils.logger import get_logger
 
 logger = get_logger()
@@ -24,9 +23,6 @@ class ProviderConfig:
     """提供商配置"""
     name: str
     api_endpoint: str
-    timeout: int = 30
-    headers: Optional[Dict[str, str]] = None
-    extra_config: Optional[Dict[str, Any]] = None
 
 
 class BaseProvider(ABC):
@@ -91,11 +87,7 @@ class BaseProvider(ABC):
     def get_supported_models(self) -> List[str]:
         """获取支持的模型列表"""
         return []
-    
-    def create_chat_id(self) -> str:
-        """生成聊天ID"""
-        return f"chatcmpl-{uuid.uuid4().hex}"
-    
+
     def create_openai_chunk(
         self, 
         chat_id: str, 
@@ -115,36 +107,6 @@ class BaseProvider(ABC):
                 "finish_reason": finish_reason,
                 "logprobs": None,
             }],
-            "system_fingerprint": f"fp_{self.name}_001",
-        }
-    
-    def create_openai_response(
-        self, 
-        chat_id: str, 
-        model: str, 
-        content: str, 
-        usage: Optional[Dict[str, int]] = None
-    ) -> Dict[str, Any]:
-        """创建OpenAI格式的非流式响应"""
-        return {
-            "id": chat_id,
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": model,
-            "choices": [{
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": content
-                },
-                "finish_reason": "stop",
-                "logprobs": None,
-            }],
-            "usage": usage or {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0
-            },
             "system_fingerprint": f"fp_{self.name}_001",
         }
 
@@ -188,11 +150,7 @@ class BaseProvider(ABC):
     async def format_sse_chunk(self, chunk: Dict[str, Any]) -> str:
         """格式化SSE响应块"""
         return f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-    
-    async def format_sse_done(self) -> str:
-        """格式化SSE结束标记"""
-        return "data: [DONE]\n\n"
-    
+
     def log_request(self, request: OpenAIRequest):
         """记录请求日志"""
         self.logger.info(f"🔄 {self.name} 处理请求: {request.model}")

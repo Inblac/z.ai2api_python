@@ -2,16 +2,14 @@
 # -*- coding: utf-8 -*-
 
 import time
-import json
-from typing import List, Dict, Any, Optional
+from typing import Optional
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 
 from app.core.config import settings
-from app.models.schemas import OpenAIRequest, Message, ModelsResponse, Model, OpenAIResponse, Choice, Usage
+from app.models.schemas import OpenAIRequest, ModelsResponse, Model
 from app.utils.logger import get_logger
 from app.providers import get_provider_router
-from app.utils.token_pool import get_token_pool
 
 logger = get_logger()
 router = APIRouter()
@@ -26,53 +24,6 @@ def get_provider_router_instance():
     if provider_router is None:
         provider_router = get_provider_router()
     return provider_router
-
-
-async def handle_non_stream_response(stream_response, request: OpenAIRequest) -> JSONResponse:
-    """处理非流式响应"""
-    logger.info("📄 开始处理非流式响应")
-
-    # 收集所有流式数据
-    full_content = []
-    async for chunk_data in stream_response():
-        if chunk_data.startswith("data: "):
-            chunk_str = chunk_data[6:].strip()
-            if chunk_str and chunk_str != "[DONE]":
-                try:
-                    chunk = json.loads(chunk_str)
-                    if "choices" in chunk and chunk["choices"]:
-                        choice = chunk["choices"][0]
-                        if "delta" in choice and "content" in choice["delta"]:
-                            content = choice["delta"]["content"]
-                            if content:
-                                full_content.append(content)
-                except json.JSONDecodeError:
-                    continue
-
-    # 构建响应
-    response_data = OpenAIResponse(
-        id=f"chatcmpl-{int(time.time())}",
-        object="chat.completion",
-        created=int(time.time()),
-        model=request.model,
-        choices=[Choice(
-            index=0,
-            message=Message(
-                role="assistant",
-                content="".join(full_content),
-                tool_calls=None
-            ),
-            finish_reason="stop"
-        )],
-        usage=Usage(
-            prompt_tokens=0,
-            completion_tokens=0,
-            total_tokens=0
-        )
-    )
-
-    logger.info("✅ 非流式响应处理完成")
-    return JSONResponse(content=response_data.model_dump(exclude_none=True))
 
 
 @router.get("/v1/models")
@@ -151,11 +102,7 @@ async def chat_completions(request: OpenAIRequest, authorization: str = Header(N
                 raise HTTPException(status_code=500, detail="Expected streaming response but got non-streaming result")
         else:
             # 非流式响应
-            if isinstance(result, dict):
-                return JSONResponse(content=result)
-            else:
-                # 如果是异步生成器，需要收集所有内容
-                return await handle_non_stream_response(result, request)
+            return JSONResponse(content=result)
 
     except HTTPException:
         # 重新抛出 HTTP 异常
@@ -163,96 +110,3 @@ async def chat_completions(request: OpenAIRequest, authorization: str = Header(N
     except Exception as e:
         logger.error(f"❌ 请求处理失败: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
-
-
-# Token pool management endpoints
-
-
-@router.get("/v1/token-pool/status")
-async def get_token_pool_status():
-    """获取token池状态信息"""
-    try:
-        token_pool = get_token_pool()
-        if not token_pool:
-            return {
-                "status": "disabled",
-                "message": "Token池未初始化，当前仅使用匿名模式",
-                "anonymous_mode": settings.ANONYMOUS_MODE,
-                "auth_tokens_file": settings.AUTH_TOKENS_FILE,
-                "auth_tokens_configured": len(settings.auth_token_list) > 0
-            }
-
-        pool_status = token_pool.get_pool_status()
-        return {
-            "status": "active",
-            "pool_info": pool_status,
-            "config": {
-                "anonymous_mode": settings.ANONYMOUS_MODE,
-                "failure_threshold": settings.TOKEN_FAILURE_THRESHOLD,
-                "recovery_timeout": settings.TOKEN_RECOVERY_TIMEOUT,
-                "health_check_interval": settings.TOKEN_HEALTH_CHECK_INTERVAL
-            }
-        }
-    except Exception as e:
-        logger.error(f"获取token池状态失败: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get token pool status: {str(e)}")
-
-
-@router.post("/v1/token-pool/health-check")
-async def trigger_health_check():
-    """手动触发token池健康检查"""
-    try:
-        token_pool = get_token_pool()
-        if not token_pool:
-            raise HTTPException(status_code=404, detail="Token池未初始化")
-
-        start_time = time.time()
-        logger.info("🔍 API触发Token池健康检查...")
-        await token_pool.health_check_all()
-        duration = time.time() - start_time
-
-        pool_status = token_pool.get_pool_status()
-        total_tokens = pool_status['total_tokens']
-        healthy_tokens = sum(1 for token_info in pool_status['tokens'] if token_info['is_healthy'])
-
-        response = {
-            "status": "completed",
-            "message": f"健康检查已完成，耗时 {duration:.2f} 秒",
-            "summary": {
-                "total_tokens": total_tokens,
-                "healthy_tokens": healthy_tokens,
-                "unhealthy_tokens": total_tokens - healthy_tokens,
-                "health_rate": f"{(healthy_tokens/total_tokens*100):.1f}%" if total_tokens > 0 else "0%",
-                "duration_seconds": round(duration, 2)
-            },
-            "pool_info": pool_status
-        }
-
-        logger.info(f"✅ API健康检查完成: {healthy_tokens}/{total_tokens} 个token健康")
-        return response
-    except Exception as e:
-        logger.error(f"健康检查失败: {e}")
-        raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
-
-
-@router.post("/v1/token-pool/update")
-async def update_token_pool_endpoint(tokens: List[str]):
-    """动态更新token池"""
-    try:
-        from app.utils.token_pool import update_token_pool
-
-        valid_tokens = [token.strip() for token in tokens if token.strip()]
-        if not valid_tokens:
-            raise HTTPException(status_code=400, detail="至少需要提供一个有效的token")
-
-        update_token_pool(valid_tokens)
-        token_pool = get_token_pool()
-
-        return {
-            "status": "updated",
-            "message": f"Token池已更新，共 {len(valid_tokens)} 个token",
-            "pool_info": token_pool.get_pool_status() if token_pool else None
-        }
-    except Exception as e:
-        logger.error(f"更新token池失败: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to update token pool: {str(e)}")
