@@ -10,7 +10,6 @@ from app.core.config import settings
 from app.core import openai
 from app.utils.reload_config import RELOAD_CONFIG
 from app.utils.logger import setup_logger
-from app.providers import initialize_providers
 
 from granian import Granian
 
@@ -21,9 +20,6 @@ logger = setup_logger(log_dir="logs", debug_mode=settings.DEBUG_LOGGING)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 初始化提供商系统
-    initialize_providers()
-
     yield
 
     logger.info("🔄 应用正在关闭...")

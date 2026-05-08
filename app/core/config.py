@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import os
-from typing import Dict
 from pydantic_settings import BaseSettings
 
 
@@ -35,33 +34,6 @@ class Settings(BaseSettings):
     GLM51_MODEL: str = os.getenv("GLM51_MODEL", "GLM-5.1")
     GLM51_THINKING_MODEL: str = os.getenv("GLM51_THINKING_MODEL", "GLM-5.1-Thinking")
     GLM51_SEARCH_MODEL: str = os.getenv("GLM51_SEARCH_MODEL", "GLM-5.1-Search")
-
-    # Provider Model Mapping
-    @property
-    def provider_model_mapping(self) -> Dict[str, str]:
-        """模型到提供商的映射"""
-        return {
-            # Z.AI models
-            "GLM-4.5": "zai",
-            "GLM-4.5-Thinking": "zai",
-            "GLM-4.5-Search": "zai",
-            "GLM-4.5-Air": "zai",
-            "GLM-4.6": "zai",
-            "GLM-4.6-Thinking": "zai",
-            "GLM-4.6-Search": "zai",
-            "GLM-4.7": "zai",
-            "GLM-4.7-Thinking": "zai",
-            "GLM-4.7-Search": "zai",
-            "GLM-5": "zai",
-            "GLM-5-Thinking": "zai",
-            "GLM-5-Search": "zai",
-            "GLM-5-Turbo": "zai",
-            "GLM-5-Turbo-Thinking": "zai",
-            "GLM-5-Turbo-Search": "zai",
-            "GLM-5.1": "zai",
-            "GLM-5.1-Thinking": "zai",
-            "GLM-5.1-Search": "zai",
-        }
 
     # Server Configuration
     LISTEN_PORT: int = int(os.getenv("LISTEN_PORT", "8080"))

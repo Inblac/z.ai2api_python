@@ -23,6 +23,8 @@ class ProviderConfig:
     """提供商配置"""
     name: str
     api_endpoint: str
+    timeout: int = 30
+    headers: Optional[Dict[str, str]] = None
 
 
 class BaseProvider(ABC):
@@ -178,39 +180,4 @@ class BaseProvider(ABC):
         }
 
 
-class ProviderRegistry:
-    """提供商注册表"""
-    
-    def __init__(self):
-        self._providers: Dict[str, BaseProvider] = {}
-        self._model_mapping: Dict[str, str] = {}
-    
-    def register(self, provider: BaseProvider, models: List[str]):
-        """注册提供商"""
-        self._providers[provider.name] = provider
-        for model in models:
-            self._model_mapping[model] = provider.name
-        logger.info(f"📝 注册提供商: {provider.name}, 模型: {models}")
-    
-    def get_provider(self, model: str) -> Optional[BaseProvider]:
-        """根据模型获取提供商"""
-        provider_name = self._model_mapping.get(model)
-        if provider_name:
-            return self._providers.get(provider_name)
-        return None
-    
-    def get_provider_by_name(self, name: str) -> Optional[BaseProvider]:
-        """根据名称获取提供商"""
-        return self._providers.get(name)
-    
-    def list_models(self) -> List[str]:
-        """列出所有支持的模型"""
-        return list(self._model_mapping.keys())
-    
-    def list_providers(self) -> List[str]:
-        """列出所有提供商"""
-        return list(self._providers.keys())
 
-
-# 全局提供商注册表
-provider_registry = ProviderRegistry()

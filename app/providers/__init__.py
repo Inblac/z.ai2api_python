@@ -2,21 +2,14 @@
 # -*- coding: utf-8 -*-
 
 """
-多提供商架构包
-提供统一的提供商接口和路由机制
+Z.AI 提供商包
 """
 
-from app.providers.base import BaseProvider, ProviderConfig, provider_registry
+from app.providers.base import BaseProvider, ProviderConfig
 from app.providers.zai_provider import ZAIProvider
-from app.providers.provider_factory import ProviderFactory, ProviderRouter, get_provider_router, initialize_providers
 
 __all__ = [
     "BaseProvider",
-    "ProviderConfig", 
-    "provider_registry",
+    "ProviderConfig",
     "ZAIProvider",
-    "ProviderFactory",
-    "ProviderRouter",
-    "get_provider_router",
-    "initialize_providers"
 ]
