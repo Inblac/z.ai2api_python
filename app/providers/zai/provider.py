@@ -12,7 +12,7 @@ import json
 import httpx
 import traceback
 from datetime import datetime
-from typing import Dict, List, Any, Optional, AsyncGenerator, Union, Generator
+from typing import Dict, List, Any, Optional, AsyncGenerator, Union
 
 from app.core.config import settings
 from app.models.schemas import OpenAIRequest, Message
@@ -26,14 +26,14 @@ from app.providers.zai.transformer import (
     merge_messages_to_zai_format,
     serialize_messages,
     get_user_message_text,
+    inject_tools_prompt,
 )
 from app.providers.zai._chunk_utils import (
     create_openai_chunk,
     format_sse_chunk,
     streaming_error_generator,
 )
-from app.providers.zai.sse_parser import parse_non_tool_sse_stream
-from app.providers.zai.sse_tool_handler import SSEToolHandler
+from app.providers.zai.sse_parser import parse_non_tool_sse_stream, parse_tool_prompt_sse_stream
 from app.providers.zai.non_stream import aggregate_non_stream_response
 
 logger = get_logger()
@@ -116,6 +116,7 @@ class ZAIProvider:
                         response.aiter_lines(),
                         transformed["chat_id"],
                         transformed["model"],
+                        has_tools=transformed.get("has_tools", False),
                     )
                 finally:
                     if settings.AUTO_DELETE_UPSTREAM_CHAT:
@@ -152,6 +153,14 @@ class ZAIProvider:
             or requested_thinking_enable
             or ("-thinking" in requested_model.casefold())
         )
+
+        has_tools = bool(
+            settings.TOOL_SUPPORT and not is_thinking and request.tools
+        )
+
+        if has_tools:
+            original_messages = inject_tools_prompt(original_messages, request.tools)
+            logger.info("注入工具提示词: {} 个工具", len(request.tools))
 
         if request.messages:
             merged_messages_content = merge_messages_to_zai_format(
@@ -226,15 +235,6 @@ class ZAIProvider:
         params["current_url"] = f"{BASE_URL}/c/{chat_id}"
         params["pathname"] = f"/c/{chat_id}"
 
-        tools = (
-            request.tools
-            # if settings.TOOL_SUPPORT and not is_thinking and request.tools
-            if settings.TOOL_SUPPORT and not is_thinking and request.tools
-            else None
-        )
-        if tools:
-            logger.info("启用工具支持: {} 个工具", len(tools))
-
         body: Dict[str, Any] = {
             "stream": True,
             "model": upstream_model_id,
@@ -274,8 +274,6 @@ class ZAIProvider:
             "current_user_message_parent_id": None,
         }
 
-        body["tools"] = tools if tools else None
-
         if request.temperature is not None:
             body["params"]["temperature"] = request.temperature
         if request.max_tokens is not None:
@@ -302,6 +300,7 @@ class ZAIProvider:
             "token": token,
             "chat_id": chat_id,
             "model": requested_model,
+            "has_tools": has_tools,
         }
 
     async def _create_stream_response(
@@ -352,15 +351,10 @@ class ZAIProvider:
 
                     chat_id = transformed["chat_id"]
                     model = transformed["model"]
-                    has_tools = transformed["body"].get("tools") is not None
+                    has_tools = transformed.get("has_tools", False)
 
                     if has_tools:
-                        # 工具模式：委托给 SSEToolHandler
-                        tool_handler = SSEToolHandler(model, stream=True)
-                        logger.info(
-                            "初始化工具处理器: {} 个工具",
-                            len(transformed["body"].get("tools", [])),
-                        )
+                        logger.info("初始化工具提示词注入模式解析器")
                         try:
                             role_chunk = create_openai_chunk(
                                 chat_id, model, {"role": "assistant"}
@@ -368,22 +362,10 @@ class ZAIProvider:
                             yield format_sse_chunk(role_chunk)
                         except Exception:
                             pass
-
-                        try:
-                            async for line in response.aiter_lines():
-                                if not line:
-                                    continue
-                                for output in _handle_tool_sse_line(
-                                    line, tool_handler
-                                ):
-                                    yield output
-                        except Exception as e:
-                            logger.error("工具流处理错误: {}", e)
-                            logger.error(traceback.format_exc())
-                            async for chunk in streaming_error_generator(
-                                "流处理失败", "stream_error"
-                            ):
-                                yield chunk
+                        async for chunk in parse_tool_prompt_sse_stream(
+                            response.aiter_lines(), chat_id, model
+                        ):
+                            yield chunk
                     else:
                         # 非工具模式：委托给 sse_parser
                         try:
@@ -411,29 +393,4 @@ class ZAIProvider:
             await _cleanup()
 
 
-def _handle_tool_sse_line(line: str, tool_handler: SSEToolHandler) -> Generator[str, None, None]:
-    if not line.startswith("data:"):
-        return
-    chunk_str = line[5:].strip()
-    if not chunk_str or chunk_str == "[DONE]":
-        return
 
-    try:
-        chunk = json.loads(chunk_str)
-        if chunk.get("type") != "chat:completion":
-            return
-
-        data = chunk.get("data", {})
-        sse_chunk = {
-            "phase": data.get("phase"),
-            "edit_content": data.get("edit_content", ""),
-            "delta_content": data.get("delta_content", ""),
-            "edit_index": data.get("edit_index"),
-            "usage": data.get("usage", {}),
-        }
-        for output in tool_handler.process_sse_chunk(sse_chunk):
-            yield output
-    except json.JSONDecodeError:
-        pass
-    except Exception as e:
-        logger.error("处理工具 chunk 错误: {}", e)

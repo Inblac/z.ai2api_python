@@ -12,6 +12,7 @@ import traceback
 from typing import Dict, Any, AsyncGenerator
 
 from app.providers.zai._chunk_utils import create_openai_response_with_reasoning
+from app.providers.zai.transformer import parse_tool_calls
 from app.utils.logger import get_logger
 
 logger = get_logger()
@@ -27,6 +28,7 @@ async def aggregate_non_stream_response(
     lines: AsyncGenerator[str, None],
     chat_id: str,
     model: str,
+    has_tools: bool = False,
 ) -> Dict[str, Any]:
     final_content = ""
     reasoning_content = ""
@@ -93,6 +95,16 @@ async def aggregate_non_stream_response(
     reasoning_content = (reasoning_content or "").strip()
     if not final_content and reasoning_content:
         final_content = reasoning_content
+
+    if has_tools and final_content:
+        parsed = parse_tool_calls(final_content)
+        if parsed.get("tool_calls"):
+            response = create_openai_response_with_reasoning(
+                chat_id, model, parsed.get("text", ""), reasoning_content, usage_info
+            )
+            response["choices"][0]["message"]["tool_calls"] = parsed["tool_calls"]
+            response["choices"][0]["finish_reason"] = "tool_calls"
+            return response
 
     return create_openai_response_with_reasoning(
         chat_id, model, final_content, reasoning_content, usage_info
