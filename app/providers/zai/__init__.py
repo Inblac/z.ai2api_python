@@ -1,10 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""
-Z.AI 提供商包
-"""
-
 from app.providers.zai.provider import ZAIProvider, SUPPORTED_MODELS
 
 __all__ = ["ZAIProvider", "SUPPORTED_MODELS"]

@@ -8,13 +8,13 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from app.core.config import settings
 from app.models.schemas import OpenAIRequest, ModelsResponse, Model
 from app.utils.logger import get_logger
-from app.providers.zai_provider import ZAIProvider
+from app.providers.zai.provider import ZAIProvider, SUPPORTED_MODELS
 
 logger = get_logger()
 router = APIRouter()
 
 zai_provider = ZAIProvider()
-supported_models = set(zai_provider.get_supported_models())
+supported_models_set = set(SUPPORTED_MODELS)
 
 
 @router.get("/v1/models")
@@ -23,7 +23,7 @@ async def list_models():
     return ModelsResponse(
         data=[
             Model(id=m, created=current_time, owned_by="z.ai")
-            for m in zai_provider.get_supported_models()
+            for m in SUPPORTED_MODELS
         ]
     )
 
@@ -32,12 +32,12 @@ async def list_models():
 async def chat_completions(request: OpenAIRequest, authorization: str = Header(None)):
     role = request.messages[0].role if request.messages else "unknown"
     logger.info(
-        "收到客户端请求 - 模型: %s, 流式: %s, 消息数: %s, 角色: %s, 工具数: %s",
+        "收到客户端请求 - 模型: {}, 流式: {}, 消息数: {}, 角色: {}, 工具数: {}",
         request.model, request.stream, len(request.messages), role,
         len(request.tools) if request.tools else 0,
     )
 
-    if request.model not in supported_models:
+    if request.model not in supported_models_set:
         raise HTTPException(
             status_code=404,
             detail=f"不支持的模型: {request.model}",
@@ -84,7 +84,7 @@ async def chat_completions(request: OpenAIRequest, authorization: str = Header(N
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("请求处理失败: %s", e)
+        logger.error("请求处理失败: {}", e)
         raise HTTPException(
             status_code=500, detail=f"Internal server error: {str(e)}"
         )
