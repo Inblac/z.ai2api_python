@@ -21,7 +21,7 @@ from app.utils.logger import get_logger
 from app.providers.zai.headers import get_zai_dynamic_headers, generate_browser_params
 from app.providers.zai.signature import generate_uuid, generate_signature_params
 from app.providers.zai.auth import get_zai_token
-from app.providers.zai.chat_session import create_upstream_chat, delete_upstream_chat
+from app.providers.zai.chat_session import create_upstream_chat, delete_upstream_chat, delete_all_upstream_chats
 from app.providers.zai.transformer import (
     merge_messages_to_zai_format,
     serialize_messages,
@@ -125,8 +125,7 @@ class ZAIProvider:
                     )
                 finally:
                     if settings.AUTO_DELETE_UPSTREAM_CHAT:
-                        await delete_upstream_chat(
-                            transformed.get("chat_id", ""),
+                        await delete_all_upstream_chats(
                             transformed.get("token", ""),
                             transformed.get("headers", {}),
                         )
@@ -320,8 +319,7 @@ class ZAIProvider:
             cleanup_done = True
             if not settings.AUTO_DELETE_UPSTREAM_CHAT:
                 return
-            await delete_upstream_chat(
-                transformed.get("chat_id", ""),
+            await delete_all_upstream_chats(
                 transformed.get("token", ""),
                 transformed.get("headers", {}),
             )

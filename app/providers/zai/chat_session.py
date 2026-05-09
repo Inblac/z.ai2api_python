@@ -141,3 +141,63 @@ async def delete_upstream_chat(
             )
     except Exception as e:
         logger.warning(f"删除上游 chat 异常: {e}")
+
+
+async def list_upstream_chats(token: str, headers: Dict[str, str]) -> list[dict]:
+    """获取上游所有 default 类型的对话列表。"""
+    if not token:
+        logger.warning("跳过获取对话列表，token 为空")
+        return []
+
+    request_headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {token}",
+        "User-Agent": headers.get("User-Agent", ""),
+        "Accept-Language": headers.get("Accept-Language", "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7"),
+        "Priority": headers.get("Priority", "u=1, i"),
+        "sec-ch-ua": headers.get("sec-ch-ua", ""),
+        "sec-ch-ua-mobile": headers.get("sec-ch-ua-mobile", "?0"),
+        "sec-ch-ua-platform": headers.get("sec-ch-ua-platform", '"Windows"'),
+        "Sec-Fetch-Dest": headers.get("Sec-Fetch-Dest", "empty"),
+        "Sec-Fetch-Mode": headers.get("Sec-Fetch-Mode", "cors"),
+        "Sec-Fetch-Site": headers.get("Sec-Fetch-Site", "same-origin"),
+        "Origin": BASE_URL,
+        "Referer": f"{BASE_URL}/",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(
+                f"{BASE_URL}/api/v1/chats/",
+                params={"page": 1, "type": "default"},
+                headers=request_headers,
+            )
+
+        if response.is_success:
+            chats: list[dict] = response.json()
+            logger.info("获取到 {} 个上游对话", len(chats))
+            return chats
+        else:
+            logger.warning("获取对话列表失败: {} {}", response.status_code, response.text)
+            return []
+    except Exception as e:
+        logger.warning(f"获取对话列表异常: {e}")
+        return []
+
+
+async def delete_all_upstream_chats(
+    token: str,
+    headers: Dict[str, str],
+) -> None:
+    """获取所有对话列表，逐个全部删除。"""
+    if not token:
+        logger.warning("跳过批量删除，token 为空")
+        return
+
+    chats = await list_upstream_chats(token, headers)
+    for chat in chats:
+        chat_id = chat.get("id", "")
+        await delete_upstream_chat(chat_id, token, headers)
+
+    logger.info("批量删除完成: 共删除 {} 个对话", len(chats))
