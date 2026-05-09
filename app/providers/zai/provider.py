@@ -107,13 +107,18 @@ class ZAIProvider:
                         headers=transformed["headers"],
                         json=transformed["body"],
                     )
+                if not response.is_success:
+                    error_msg = f"Z.AI API 错误: {response.status_code}"
+                    logger.error(error_msg)
+                    return {"error": {"message": error_msg, "type": "upstream_error", "code": response.status_code}}
+                body_lines = response.text.splitlines()
+                logger.debug("上游非流式响应: status={}, body={}", response.status_code, body_lines[:50])
                 try:
-                    if not response.is_success:
-                        error_msg = f"Z.AI API 错误: {response.status_code}"
-                        logger.error(error_msg)
-                        return {"error": {"message": error_msg, "type": "upstream_error", "code": response.status_code}}
+                    async def _line_gen():
+                        for line in body_lines:
+                            yield line
                     return await aggregate_non_stream_response(
-                        response.aiter_lines(),
+                        _line_gen(),
                         transformed["chat_id"],
                         transformed["model"],
                         has_tools=transformed.get("has_tools", False),
@@ -236,7 +241,7 @@ class ZAIProvider:
         params["pathname"] = f"/c/{chat_id}"
 
         body: Dict[str, Any] = {
-            "stream": True,
+            "stream": request.stream,
             "model": upstream_model_id,
             "messages": messages,
             "signature_prompt": user_message_content,
