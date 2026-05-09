@@ -51,13 +51,14 @@ def get_zai_dynamic_headers(chat_id: str = "") -> Dict[str, str]:
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
         "User-Agent": user_agent,
-        "Accept-Language": "zh-CN",
+        "Accept-Language": "en-US",
         "DNT": "1",
         "Priority": "u=1, i",
         "Sec-Fetch-Dest": "empty",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Site": "same-origin",
         "X-FE-Version": settings.X_FE_VERSION,
+        "X-Region": "domestic",
         "Origin": "https://chat.z.ai",
     }
 
@@ -97,8 +98,8 @@ def generate_browser_params(user_agent: str) -> Dict[str, Any]:
     now = datetime.now()
 
     return {
-        "language": "zh-CN",
-        "languages": "zh-CN,en-US",
+        "language": "en-US",
+        "languages": "en-US",
         "timezone": "Asia/Shanghai",
         "timezone_offset": -480,
         "local_time": now.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",

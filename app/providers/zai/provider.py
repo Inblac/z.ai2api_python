@@ -215,11 +215,6 @@ class ZAIProvider:
 
         upstream_model_id = MODEL_MAPPING.get(requested_model, "0727-360B-API")
 
-        mcp_servers: List[str] = []
-        if is_search and "-4.5" in requested_model:
-            mcp_servers.append("deep-web-search")
-            logger.info("检测到搜索模型，添加 deep-web-search MCP 服务器")
-
         current_user_message_id = generate_uuid()
         logger.debug(
             "请求模型：{}，上游模型ID：{}，思考模式：{}，搜索模式：{}",
@@ -233,7 +228,6 @@ class ZAIProvider:
             enable_thinking=is_thinking,
             web_search=is_search,
             user_message_id=current_user_message_id,
-            mcp_servers=mcp_servers,
         )
         headers["Referer"] = f"{BASE_URL}/c/{chat_id}"
         params["current_url"] = f"{BASE_URL}/c/{chat_id}"
@@ -261,7 +255,6 @@ class ZAIProvider:
                 "title_generation": False,
                 "tags_generation": False,
             },
-            "mcp_servers": mcp_servers,
             "variables": {
                 "{{USER_NAME}}": "ProUltra",
                 "{{USER_LOCATION}}": "Unknown",
@@ -270,7 +263,7 @@ class ZAIProvider:
                 "{{CURRENT_TIME}}": datetime.now().strftime("%H:%M:%S"),
                 "{{CURRENT_WEEKDAY}}": datetime.now().strftime("%A"),
                 "{{CURRENT_TIMEZONE}}": "Asia/Shanghai",
-                "{{USER_LANGUAGE}}": "zh-CN",
+                "{{USER_LANGUAGE}}": "en-US",
             },
             "chat_id": chat_id,
             "id": generate_uuid(),
