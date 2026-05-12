@@ -18,6 +18,7 @@ from app.providers.zai._chunk_utils import (
     format_sse_chunk,
     streaming_error_generator,
 )
+from app.providers.zai._content_utils import clean_thinking_content
 from app.providers.zai.transformer import parse_tool_calls
 from app.utils.logger import get_logger
 
@@ -41,13 +42,6 @@ def _strip_citations(text: str, pending: list[str]) -> tuple[str, list[str]]:
     if m:
         return combined[: m.start()], [m.group()]
     return combined, []
-
-
-def _clean_thinking_content(delta_content: str) -> str:
-    """清洗 thinking 阶段的 delta_content，去除 <details> 包裹层。"""
-    if delta_content.startswith("<details") and "</summary>\n>" in delta_content:
-        return delta_content.split("</summary>\n>")[-1].strip()
-    return delta_content
 
 
 def _format_search_results(metadata: dict | None) -> str | None:
@@ -99,7 +93,7 @@ def _thinking_sse(data: dict, chat_id: str, model: str) -> str | None:
     dc = data.get("delta_content", "")
     if not dc:
         return None
-    content = _clean_thinking_content(dc).replace("\n>", "\n")
+    content = clean_thinking_content(dc).replace("\n>", "\n")
     return format_sse_chunk(create_openai_chunk(chat_id, model, {"role": "assistant", "reasoning_content": content}))
 
 

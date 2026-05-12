@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import os
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,48 +10,22 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # API Configuration
-    API_ENDPOINT: str = "https://chat.z.ai/api/chat/completions"
-    AUTH_TOKEN: str = os.getenv("AUTH_TOKEN", "sk-your-api-key")
-
-    # Model Configuration
-    GLM45_MODEL: str = os.getenv("GLM45_MODEL", "GLM-4.5")
-    GLM45_THINKING_MODEL: str = os.getenv("GLM45_THINKING_MODEL", "GLM-4.5-Thinking")
-    GLM45_SEARCH_MODEL: str = os.getenv("GLM45_SEARCH_MODEL", "GLM-4.5-Search")
-    AIR_MODEL: str = os.getenv("AIR_MODEL", "GLM-4.5-Air")
-    GLM46_MODEL: str = os.getenv("GLM46_MODEL", "GLM-4.6")
-    GLM46_THINKING_MODEL: str = os.getenv("GLM46_THINKING_MODEL", "GLM-4.6-Thinking")
-    GLM46_SEARCH_MODEL: str = os.getenv("GLM46_SEARCH_MODEL", "GLM-4.6-Search")
-    GLM47_MODEL: str = os.getenv("GLM47_MODEL", "GLM-4.7")
-    GLM47_THINKING_MODEL: str = os.getenv("GLM47_THINKING_MODEL", "GLM-4.7-Thinking")
-    GLM47_SEARCH_MODEL: str = os.getenv("GLM47_SEARCH_MODEL", "GLM-4.7-Search")
-    GLM5_MODEL: str = os.getenv("GLM5_MODEL", "GLM-5")
-    GLM5_THINKING_MODEL: str = os.getenv("GLM5_THINKING_MODEL", "GLM-5-Thinking")
-    GLM5_SEARCH_MODEL: str = os.getenv("GLM5_SEARCH_MODEL", "GLM-5-Search")
-    GLM5T_MODEL: str = os.getenv("GLM5T_MODEL", "GLM-5-Turbo")
-    GLM5T_THINKING_MODEL: str = os.getenv(
-        "GLM5T_THINKING_MODEL", "GLM-5-Turbo-Thinking"
-    )
-    GLM5T_SEARCH_MODEL: str = os.getenv("GLM5T_SEARCH_MODEL", "GLM-5-Turbo-Search")
-    GLM51_MODEL: str = os.getenv("GLM51_MODEL", "GLM-5.1")
-    GLM51_THINKING_MODEL: str = os.getenv("GLM51_THINKING_MODEL", "GLM-5.1-Thinking")
-    GLM51_SEARCH_MODEL: str = os.getenv("GLM51_SEARCH_MODEL", "GLM-5.1-Search")
+    AUTH_TOKEN: str = "sk-your-api-key"
 
     # Server Configuration
-    LISTEN_PORT: int = int(os.getenv("LISTEN_PORT", "8080"))
-    DEBUG_LOGGING: bool = os.getenv("DEBUG_LOGGING", "true").lower() == "true"
-    SERVICE_NAME: str = os.getenv("SERVICE_NAME", "z-ai2api-server")
+    LISTEN_PORT: int = 8080
+    DEBUG_LOGGING: bool = True
+    SERVICE_NAME: str = "z-ai2api-server"
 
-    ANONYMOUS_MODE: bool = os.getenv("ANONYMOUS_MODE", "true").lower() == "true"
-    TOOL_SUPPORT: bool = os.getenv("TOOL_SUPPORT", "true").lower() == "true"
-    # 请求结束后是否自动删除 Z.AI 上游会话
-    AUTO_DELETE_UPSTREAM_CHAT: bool = (
-        os.getenv("AUTO_DELETE_UPSTREAM_CHAT", "true").lower() == "true"
-    )
+    ANONYMOUS_MODE: bool = True
+    TOOL_SUPPORT: bool = True
+    # 请求结束后是否批量删除账号下所有 Z.AI 上游 default 会话
+    AUTO_DELETE_UPSTREAM_CHAT: bool = True
 
     # Z.AI Signature Configuration
-    ZAI_SIGNATURE_KEY: str = os.getenv("ZAI_SIGNATURE_KEY", "junjie")
+    ZAI_SIGNATURE_KEY: str = "junjie"
 
     # X-FE-Version Header
-    X_FE_VERSION: str = os.getenv("X_FE_VERSION", "prod-fe-1.0.106")
+    X_FE_VERSION: str = "prod-fe-1.0.106"
 
 settings = Settings()

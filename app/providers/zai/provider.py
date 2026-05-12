@@ -5,7 +5,7 @@
 Z.AI 提供商编排层
 
 组合 headers、signature、auth、chat_session、transformer、
-sse_parser、sse_tool_handler、non_stream 各模块，对外提供统一入口。
+sse_parser、non_stream 各模块，对外提供统一入口。
 """
 
 import json
@@ -21,7 +21,7 @@ from app.utils.logger import get_logger
 from app.providers.zai.headers import get_zai_dynamic_headers, generate_browser_params
 from app.providers.zai.signature import generate_uuid, generate_signature_params
 from app.providers.zai.auth import get_zai_token
-from app.providers.zai.chat_session import create_upstream_chat, delete_upstream_chat, delete_all_upstream_chats
+from app.providers.zai.chat_session import create_upstream_chat, delete_all_upstream_chats
 from app.providers.zai.transformer import (
     merge_messages_to_zai_format,
     serialize_messages,
@@ -69,8 +69,28 @@ BASE_URL = "https://chat.z.ai"
 class ZAIProvider:
     """Z.AI 提供商 — 编排层"""
 
-    def __init__(self):
-        self._client_token: Optional[str] = None
+    @staticmethod
+    def _mask_sensitive_payload(payload: Any) -> Any:
+        if isinstance(payload, dict):
+            masked = {}
+            for key, value in payload.items():
+                lower_key = str(key).lower()
+                if lower_key == "authorization":
+                    masked[key] = "Bearer ***" if str(value).startswith("Bearer ") else "***"
+                elif lower_key in {"token", "x-signature"}:
+                    masked[key] = "***"
+                else:
+                    masked[key] = ZAIProvider._mask_sensitive_payload(value)
+            return masked
+        if isinstance(payload, list):
+            return [ZAIProvider._mask_sensitive_payload(item) for item in payload]
+        return payload
+
+    @staticmethod
+    def _role_chunk(chat_id: str, model: str) -> str:
+        return format_sse_chunk(
+            create_openai_chunk(chat_id, model, {"role": "assistant"})
+        )
 
     def get_supported_models(self) -> List[str]:
         return SUPPORTED_MODELS
@@ -80,14 +100,13 @@ class ZAIProvider:
         request: OpenAIRequest,
         client_api_key: Optional[str] = None,
     ) -> Union[Dict[str, Any], AsyncGenerator[str, None]]:
-        self._client_token = client_api_key
         logger.info(
             "处理请求: {}, 消息数: {}, 流式: {}",
             request.model, len(request.messages), request.stream,
         )
 
         try:
-            transformed = await self._transform_request(request)
+            transformed = await self._transform_request(request, client_api_key)
 
             if not transformed.get("token"):
                 error_msg = "请求转换失败，无法获取令牌"
@@ -139,7 +158,11 @@ class ZAIProvider:
             else:
                 return {"error": {"message": f"请求处理 错误: {str(e)}", "type": "provider_error", "code": "internal_error"}}
 
-    async def _transform_request(self, request: OpenAIRequest) -> Dict[str, Any]:
+    async def _transform_request(
+        self,
+        request: OpenAIRequest,
+        client_api_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
         logger.info("转换 OpenAI 请求到 Z.AI 格式: {}", request.model)
         original_messages = list(request.messages)
         requested_model = request.model
@@ -159,7 +182,9 @@ class ZAIProvider:
         )
 
         has_tools = bool(
-            settings.TOOL_SUPPORT and request.tools
+            settings.TOOL_SUPPORT
+            and request.tools
+            and request.tool_choice != "none"
         )
 
         if has_tools:
@@ -174,7 +199,7 @@ class ZAIProvider:
                 Message(role="user", content=merged_messages_content)
             ]
 
-        token = await get_zai_token(self._client_token)
+        token = await get_zai_token(client_api_key)
         if not token:
             logger.error("无法获取认证令牌，请求将失败")
             return {"url": "", "params": {}, "headers": {}, "body": {}, "token": None, "chat_id": "no-chat-id", "model": request.model}
@@ -213,7 +238,7 @@ class ZAIProvider:
 
         messages = serialize_messages(request.messages)
 
-        upstream_model_id = MODEL_MAPPING.get(requested_model, "0727-360B-API")
+        upstream_model_id = MODEL_MAPPING[requested_model]
 
         current_user_message_id = generate_uuid()
         logger.debug(
@@ -278,11 +303,11 @@ class ZAIProvider:
 
         logger.debug(
             "转换后的请求头:\n{}",
-            json.dumps(headers, ensure_ascii=False, indent=2),
+            json.dumps(self._mask_sensitive_payload(headers), ensure_ascii=False, indent=2),
         )
         logger.debug(
             "转换后的请求参数:\n{}",
-            json.dumps(params, ensure_ascii=False, indent=2),
+            json.dumps(self._mask_sensitive_payload(params), ensure_ascii=False, indent=2),
         )
         logger.debug(
             "转换后的请求体:\n{}",
@@ -351,26 +376,14 @@ class ZAIProvider:
 
                     if has_tools:
                         logger.info("初始化工具提示词注入模式解析器")
-                        try:
-                            role_chunk = create_openai_chunk(
-                                chat_id, model, {"role": "assistant"}
-                            )
-                            yield format_sse_chunk(role_chunk)
-                        except Exception:
-                            pass
+                        yield self._role_chunk(chat_id, model)
                         async for chunk in parse_tool_prompt_sse_stream(
                             response.aiter_lines(), chat_id, model
                         ):
                             yield chunk
                     else:
                         # 非工具模式：委托给 sse_parser
-                        try:
-                            role_chunk = create_openai_chunk(
-                                chat_id, model, {"role": "assistant"}
-                            )
-                            yield format_sse_chunk(role_chunk)
-                        except Exception:
-                            pass
+                        yield self._role_chunk(chat_id, model)
                         async for chunk in parse_non_tool_sse_stream(
                             response.aiter_lines(), chat_id, model
                         ):

@@ -298,6 +298,30 @@ def extract_json_object(text: str, key: str) -> str | None:
     return None
 
 
+def normalize_tool_calls(raw_tool_calls: Any) -> List[Dict[str, Any]]:
+    tool_calls = []
+    for idx, tc in enumerate(raw_tool_calls or []):
+        if not isinstance(tc, dict):
+            continue
+
+        fn = tc.get("function", {})
+        name = tc.get("name") or fn.get("name", "")
+        args = tc.get("arguments")
+        if args is None and isinstance(fn, dict):
+            args = fn.get("arguments")
+        if not isinstance(args, str):
+            args = json.dumps(args or {}, ensure_ascii=False)
+        tool_calls.append({
+            "id": f"call_{uuid.uuid4().hex[:8]}_{idx}",
+            "type": "function",
+            "function": {
+                "name": name,
+                "arguments": args,
+            },
+        })
+    return tool_calls
+
+
 def parse_tool_calls(content: str) -> Dict[str, Any]:
     """
     从模型输出文本中解析工具调用。
@@ -323,23 +347,7 @@ def parse_tool_calls(content: str) -> Dict[str, Any]:
                 isinstance(parsed.get("tool_calls"), list)
                 and len(parsed["tool_calls"]) > 0
             ):
-                tool_calls = []
-                for idx, tc in enumerate(parsed["tool_calls"]):
-                    fn = tc.get("function", {})
-                    name = tc.get("name") or fn.get("name", "")
-                    args = tc.get("arguments")
-                    if args is None and isinstance(fn, dict):
-                        args = fn.get("arguments")
-                    if not isinstance(args, str):
-                        args = json.dumps(args or {}, ensure_ascii=False)
-                    tool_calls.append({
-                        "id": f"call_{uuid.uuid4().hex[:8]}_{idx}",
-                        "type": "function",
-                        "function": {
-                            "name": name,
-                            "arguments": args,
-                        },
-                    })
+                tool_calls = normalize_tool_calls(parsed["tool_calls"])
                 text = content.replace(brace_match, "").strip()
                 if code_block_match:
                     text = content.replace(code_block_match.group(0), "").strip()
@@ -356,21 +364,7 @@ def parse_tool_calls(content: str) -> Dict[str, Any]:
             isinstance(parsed.get("tool_calls"), list)
             and len(parsed["tool_calls"]) > 0
         ):
-            tool_calls = []
-            for idx, tc in enumerate(parsed["tool_calls"]):
-                fn = tc.get("function", {})
-                name = tc.get("name") or fn.get("name", "")
-                args = tc.get("arguments") or fn.get("arguments")
-                if not isinstance(args, str):
-                    args = json.dumps(args or {}, ensure_ascii=False)
-                tool_calls.append({
-                    "id": f"call_{uuid.uuid4().hex[:8]}_{idx}",
-                    "type": "function",
-                    "function": {
-                        "name": name,
-                        "arguments": args,
-                    },
-                })
+            tool_calls = normalize_tool_calls(parsed["tool_calls"])
             text = content.replace(working, "").strip()
             if code_block_match:
                 text = content.replace(code_block_match.group(0), "").strip()

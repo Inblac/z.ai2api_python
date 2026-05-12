@@ -176,6 +176,7 @@ docker run -d \
 | `DEBUG_LOGGING`       | `true`                                    | 调试日志开关           |
 | `ANONYMOUS_MODE`      | `true`                                    | 匿名用户模式开关           |
 | `TOOL_SUPPORT`        | `true`                                    | Function Call 功能开关 |
+| `AUTO_DELETE_UPSTREAM_CHAT` | `true`                             | 请求结束后批量删除账号下所有 Z.AI 上游 default 会话 |
 | `SCAN_LIMIT`          | `200000`                                  | 扫描限制               |
 
 > 💡 详细配置请查看 `.env.example` 文件

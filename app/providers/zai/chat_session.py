@@ -190,7 +190,7 @@ async def delete_all_upstream_chats(
     token: str,
     headers: Dict[str, str],
 ) -> None:
-    """获取所有对话列表，逐个全部删除。"""
+    """按设计清理账号下所有 default 上游会话，而不是只删除当前请求会话。"""
     if not token:
         logger.warning("跳过批量删除，token 为空")
         return

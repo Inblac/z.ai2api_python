@@ -11,17 +11,12 @@ import json
 import traceback
 from typing import Dict, Any, AsyncGenerator
 
+from app.providers.zai._content_utils import clean_thinking_content
 from app.providers.zai._chunk_utils import create_openai_response_with_reasoning
 from app.providers.zai.transformer import parse_tool_calls
 from app.utils.logger import get_logger
 
 logger = get_logger()
-
-
-def _clean_thinking_content(delta_content: str) -> str:
-    if delta_content.startswith("<details") and "</summary>\n>" in delta_content:
-        return delta_content.split("</summary>\n>")[-1].strip()
-    return delta_content
 
 
 async def aggregate_non_stream_response(
@@ -67,7 +62,7 @@ async def aggregate_non_stream_response(
 
             if phase == "thinking":
                 if delta_content:
-                    cleaned = _clean_thinking_content(delta_content)
+                    cleaned = clean_thinking_content(delta_content)
                     reasoning_content += cleaned
             elif phase == "answer":
                 if edit_content and "</details>" in edit_content:

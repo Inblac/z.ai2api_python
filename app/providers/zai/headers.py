@@ -25,6 +25,7 @@ def get_zai_dynamic_headers(chat_id: str = "") -> Dict[str, str]:
 
     chrome_version = "139"
     edge_version = "139"
+    sec_ch_ua = None
 
     if "Chrome/" in user_agent:
         try:
