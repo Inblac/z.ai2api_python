@@ -159,7 +159,7 @@ class ZAIProvider:
         )
 
         has_tools = bool(
-            settings.TOOL_SUPPORT and not is_thinking and request.tools
+            settings.TOOL_SUPPORT and request.tools
         )
 
         if has_tools:
