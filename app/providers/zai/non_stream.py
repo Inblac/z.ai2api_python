@@ -12,6 +12,7 @@ import traceback
 from typing import Dict, Any, AsyncGenerator
 
 from app.providers.zai._chunk_utils import create_openai_response_with_reasoning
+from app.providers.zai.sse_parser import _format_search_results
 from app.providers.zai.transformer import parse_tool_calls
 from app.utils.logger import get_logger
 
@@ -60,6 +61,10 @@ async def aggregate_non_stream_response(
             if phase == "thinking":
                 if delta_content:
                     reasoning_content += delta_content
+            elif phase == "tool_response":
+                formatted = _format_search_results(data.get("metadata"))
+                if formatted:
+                    reasoning_content += formatted
             elif phase == "answer":
                 if edit_content:
                     final_content += edit_content

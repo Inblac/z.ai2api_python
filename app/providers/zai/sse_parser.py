@@ -289,6 +289,7 @@ async def parse_tool_prompt_sse_stream(
     usage_data = {}
     line_count = 0
     citation_pending: list[str] = []
+    tool_call_count = 0
 
     try:
         async for event in _iter_completion_events(lines):
@@ -405,6 +406,7 @@ async def parse_tool_prompt_sse_stream(
                     if is_tool_call_mode:
                         parsed = parse_tool_calls(full_content)
                         if parsed.get("tool_calls"):
+                            tool_call_count = len(parsed["tool_calls"])
                             tool_calls_chunk = create_openai_chunk(
                                 chat_id,
                                 model,
@@ -421,7 +423,10 @@ async def parse_tool_prompt_sse_stream(
             except Exception as e:
                 logger.error("处理chunk错误: {}, chunk: {}", e, event.raw[:1000])
 
-        logger.info("SSE 流处理完成，共处理 {} 行数据", line_count)
+        if tool_call_count:
+            logger.info("SSE 流处理完成，共处理 {} 行数据，包含 {} 个工具", line_count, tool_call_count)
+        else:
+            logger.info("SSE 流处理完成，共处理 {} 行数据", line_count)
 
     except Exception as e:
         logger.error("流式响应处理错误: {}", e)

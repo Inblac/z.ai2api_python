@@ -41,10 +41,11 @@ def inject_tools_prompt(messages: List[Message], tools: List[Dict[str, Any]]) ->
         "STRICT RULES:\n"
         "1. If a tool is needed, output EXACTLY this format (nothing else):\n"
         '{"tool_calls":[{"name":"TOOL_NAME","arguments":{"param":"value"}}]}\n'
+        "2. tool_calls may contain one or more calls when multiple tools are needed.\n"
         "\n"
-        "2. Do NOT wrap the JSON in markdown code blocks (no ```json).\n"
-        "3. Do NOT add any explanation before or after the JSON.\n"
-        "4. If no tool is needed, respond normally with plain text.\n"
+        "3. Do NOT wrap the JSON in markdown code blocks (no ```json).\n"
+        "4. Do NOT add any explanation before or after the JSON.\n"
+        "5. If no tool is needed, respond normally with plain text.\n"
         "\n"
         "Available tools:\n"
         f"{tools_desc}\n"
@@ -52,6 +53,8 @@ def inject_tools_prompt(messages: List[Message], tools: List[Dict[str, Any]]) ->
         "Examples:\n"
         "User: What is the weather in Beijing?\n"
         'Assistant: {"tool_calls":[{"name":"get_weather","arguments":{"location":"Beijing"}}]}\n'
+        "User: Check weather and search news for Beijing.\n"
+        'Assistant: {"tool_calls":[{"name":"get_weather","arguments":{"location":"Beijing"}},{"name":"search","arguments":{"query":"Beijing news"}}]}\n'
         "\n"
         "User: Hello\n"
         "Assistant: Hello! How can I help you today?"
