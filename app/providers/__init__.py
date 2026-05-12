@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""
-Z.AI 提供商包
-"""
+import importlib
 
-from app.providers.zai.provider import ZAIProvider, SUPPORTED_MODELS
 
-__all__ = ["ZAIProvider", "SUPPORTED_MODELS"]
+def __getattr__(name):
+    if name == "zai":
+        return importlib.import_module("app.providers.zai")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

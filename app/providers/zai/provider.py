@@ -71,6 +71,7 @@ class ZAIProvider:
 
     @staticmethod
     def _mask_sensitive_payload(payload: Any) -> Any:
+        """递归脱敏日志中的 token、签名和 Authorization。"""
         if isinstance(payload, dict):
             masked = {}
             for key, value in payload.items():
@@ -88,11 +89,56 @@ class ZAIProvider:
 
     @staticmethod
     def _role_chunk(chat_id: str, model: str) -> str:
+        """生成 OpenAI 流式响应开始时的 assistant role chunk。"""
         return format_sse_chunk(
             create_openai_chunk(chat_id, model, {"role": "assistant"})
         )
 
+    @staticmethod
+    def _resolve_modes(request: OpenAIRequest, messages: List[Message]) -> Dict[str, bool]:
+        """根据请求模型、消息格式和工具参数判断上游功能模式。"""
+        requested_model = request.model
+        requested_thinking_enable = (
+            isinstance(request.thinking, dict)
+            and request.thinking.get("type") == "enabled"
+        )
+        is_anthropic_messages = any(isinstance(msg.content, list) for msg in messages)
+        return {
+            "is_search": "-search" in requested_model.casefold(),
+            "is_thinking": (
+                is_anthropic_messages
+                or requested_thinking_enable
+                or ("-thinking" in requested_model.casefold())
+            ),
+            "has_tools": bool(
+                settings.TOOL_SUPPORT
+                and request.tools
+                and request.tool_choice != "none"
+            ),
+        }
+
+    @staticmethod
+    def _build_zai_messages(
+        messages: List[Message],
+        is_thinking: bool,
+        has_tools: bool,
+        tools: Optional[List[Dict[str, Any]]],
+    ) -> List[Message]:
+        """构造上游消息，必要时注入工具提示词并合并为 Z.AI 格式。"""
+        zai_messages = list(messages)
+        if has_tools:
+            zai_messages = inject_tools_prompt(zai_messages, tools or [])
+
+        if not zai_messages:
+            return zai_messages
+
+        merged_messages_content = merge_messages_to_zai_format(
+            zai_messages, is_thinking
+        )
+        return [Message(role="user", content=merged_messages_content)]
+
     def get_supported_models(self) -> List[str]:
+        """返回当前 provider 支持的 OpenAI 兼容模型名。"""
         return SUPPORTED_MODELS
 
     async def chat_completion(
@@ -100,6 +146,7 @@ class ZAIProvider:
         request: OpenAIRequest,
         client_api_key: Optional[str] = None,
     ) -> Union[Dict[str, Any], AsyncGenerator[str, None]]:
+        """处理一次 OpenAI 兼容聊天请求，按 stream 选择响应路径。"""
         logger.info(
             "处理请求: {}, 消息数: {}, 流式: {}",
             request.model, len(request.messages), request.stream,
@@ -163,48 +210,31 @@ class ZAIProvider:
         request: OpenAIRequest,
         client_api_key: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """准备 Z.AI 上游请求，包括认证、签名、会话和请求体。"""
         logger.info("转换 OpenAI 请求到 Z.AI 格式: {}", request.model)
         original_messages = list(request.messages)
         requested_model = request.model
-
-        requested_thinking_enable = (
-            isinstance(request.thinking, dict)
-            and request.thinking.get("type") == "enabled"
-        )
-        is_anthropic_messages = any(
-            isinstance(msg.content, list) for msg in original_messages
-        )
-        is_search = "-search" in requested_model.casefold()
-        is_thinking = (
-            is_anthropic_messages
-            or requested_thinking_enable
-            or ("-thinking" in requested_model.casefold())
-        )
-
-        has_tools = bool(
-            settings.TOOL_SUPPORT
-            and request.tools
-            and request.tool_choice != "none"
-        )
+        modes = self._resolve_modes(request, original_messages)
+        is_search = modes["is_search"]
+        is_thinking = modes["is_thinking"]
+        has_tools = modes["has_tools"]
 
         if has_tools:
-            original_messages = inject_tools_prompt(original_messages, request.tools)
             logger.info("注入工具提示词: {} 个工具", len(request.tools))
 
-        if request.messages:
-            merged_messages_content = merge_messages_to_zai_format(
-                original_messages, is_thinking
-            )
-            request.messages = [
-                Message(role="user", content=merged_messages_content)
-            ]
+        zai_messages = self._build_zai_messages(
+            original_messages,
+            is_thinking,
+            has_tools,
+            request.tools,
+        )
 
         token = await get_zai_token(client_api_key)
         if not token:
             logger.error("无法获取认证令牌，请求将失败")
             return {"url": "", "params": {}, "headers": {}, "body": {}, "token": None, "chat_id": "no-chat-id", "model": request.model}
 
-        user_message_content = get_user_message_text(request.messages)
+        user_message_content = get_user_message_text(zai_messages)
         signature_params = generate_signature_params(token, user_message_content)
         if not signature_params:
             logger.error("生成签名失败，请求将失败")
@@ -236,7 +266,7 @@ class ZAIProvider:
             **browser_params,
         }
 
-        messages = serialize_messages(request.messages)
+        messages = serialize_messages(zai_messages)
 
         upstream_model_id = MODEL_MAPPING[requested_model]
 
@@ -328,9 +358,11 @@ class ZAIProvider:
     async def _create_stream_response(
         self, request: OpenAIRequest, transformed: Dict[str, Any]
     ) -> AsyncGenerator[str, None]:
+        """发送上游流式请求，并转换为 OpenAI SSE chunk。"""
         cleanup_done = False
 
         async def _cleanup():
+            """按配置批量清理上游 default 会话，确保最多执行一次。"""
             nonlocal cleanup_done
             if cleanup_done:
                 return

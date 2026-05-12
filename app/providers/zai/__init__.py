@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from app.providers.zai.provider import ZAIProvider, SUPPORTED_MODELS
+import importlib
 
-__all__ = ["ZAIProvider", "SUPPORTED_MODELS"]
+
+def __getattr__(name):
+    if name == "provider":
+        return importlib.import_module("app.providers.zai.provider")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
