@@ -11,7 +11,6 @@ import json
 import traceback
 from typing import Dict, Any, AsyncGenerator
 
-from app.providers.zai._content_utils import clean_thinking_content
 from app.providers.zai._chunk_utils import create_openai_response_with_reasoning
 from app.providers.zai.transformer import parse_tool_calls
 from app.utils.logger import get_logger
@@ -32,8 +31,6 @@ async def aggregate_non_stream_response(
         "completion_tokens": 0,
         "total_tokens": 0,
     }
-
-    cleaned = ""
 
     try:
         async for line in lines:
@@ -62,13 +59,10 @@ async def aggregate_non_stream_response(
 
             if phase == "thinking":
                 if delta_content:
-                    cleaned = clean_thinking_content(delta_content)
-                    reasoning_content += cleaned
+                    reasoning_content += delta_content
             elif phase == "answer":
-                if edit_content and "</details>" in edit_content:
-                    reasoning_content += edit_content.split(cleaned)[-1].replace(
-                        "</details>", ""
-                    )
+                if edit_content:
+                    final_content += edit_content
                 elif delta_content:
                     final_content += delta_content
             elif phase == "other":

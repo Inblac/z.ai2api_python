@@ -11,6 +11,7 @@ Z.AI SSE 流解析器
 import json
 import re
 import traceback
+from dataclasses import dataclass
 from typing import AsyncGenerator
 
 from app.providers.zai._chunk_utils import (
@@ -18,7 +19,6 @@ from app.providers.zai._chunk_utils import (
     format_sse_chunk,
     streaming_error_generator,
 )
-from app.providers.zai._content_utils import clean_thinking_content
 from app.providers.zai.transformer import parse_tool_calls
 from app.utils.logger import get_logger
 
@@ -27,6 +27,65 @@ logger = get_logger()
 _PUA_CHARS_RE = re.compile(r"[\ue000-\uf8ff]")
 _CITATION_RE = re.compile(r"【turn0search\d+】")
 _PARTIAL_CITATION_RE = re.compile(r"【[^】]*$")
+
+
+def _contains_tool_calls(text: str) -> bool:
+    return '"tool_calls"' in text or "'tool_calls'" in text or "tool_calls" in text
+
+
+@dataclass
+class SSEEvent:
+    phase: str | None
+    data: dict
+    usage: dict | None
+    raw: str
+    is_done: bool = False
+
+
+async def _iter_completion_events(
+    lines: AsyncGenerator[str, None],
+) -> AsyncGenerator[SSEEvent, None]:
+    buffer = ""
+    async for line in lines:
+        if not line:
+            continue
+
+        buffer += line + "\n"
+        while "\n" in buffer:
+            current_line, buffer = buffer.split("\n", 1)
+            if not current_line.strip() or not current_line.startswith("data:"):
+                continue
+
+            chunk_str = current_line[5:].strip()
+            if not chunk_str:
+                continue
+            if chunk_str == "[DONE]":
+                yield SSEEvent(phase=None, data={}, usage=None, raw=chunk_str, is_done=True)
+                continue
+
+            try:
+                chunk = json.loads(chunk_str)
+            except json.JSONDecodeError as e:
+                logger.debug("JSON解析错误: {}, 内容: {}", e, chunk_str[:1000])
+                continue
+
+            if chunk.get("type") != "chat:completion":
+                continue
+
+            data = chunk.get("data", {})
+            yield SSEEvent(
+                phase=data.get("phase"),
+                data=data,
+                usage=data.get("usage"),
+                raw=chunk_str,
+            )
+
+
+def _log_phase_change(phase: str | None, last_phase: str | None) -> str | None:
+    if phase and phase != last_phase:
+        logger.info("SSE 阶段: {}", phase)
+        return phase
+    return last_phase
 
 
 def _strip_citations(text: str, pending: list[str]) -> tuple[str, list[str]]:
@@ -88,12 +147,12 @@ def _tool_response_sse(data: dict, chat_id: str, model: str) -> str | None:
 def _thinking_sse(data: dict, chat_id: str, model: str) -> str | None:
     """将 thinking 阶段的 delta_content 转为 reasoning_content SSE chunk。
 
-    清洗 <details> 包裹层后发出，无内容时返回 None。
+    无内容时返回 None。
     """
     dc = data.get("delta_content", "")
     if not dc:
         return None
-    content = clean_thinking_content(dc).replace("\n>", "\n")
+    content = dc.replace("\n>", "\n")
     return format_sse_chunk(create_openai_chunk(chat_id, model, {"role": "assistant", "reasoning_content": content}))
 
 
@@ -115,16 +174,6 @@ def _content_sse(text: str, chat_id: str, model: str) -> str:
     return format_sse_chunk(create_openai_chunk(chat_id, model, {"role": "assistant", "content": text}))
 
 
-def _thinking_with_edit_sse(edit_content: str, pre_delta: str | None, chat_id: str, model: str) -> str:
-    """从 edit_content 中提取 thinking 尾部并生成 SSE chunk。
-
-    用 pre_delta 切分后取最后一段，去除 ``</details>`` 标记，
-    以 reasoning_content 发出。
-    """
-    thinking = edit_content.split(pre_delta)[-1].replace("</details>", "")
-    return format_sse_chunk(create_openai_chunk(chat_id, model, {"role": "assistant", "reasoning_content": thinking}))
-
-
 async def parse_non_tool_sse_stream(
     lines: AsyncGenerator[str, None],
     chat_id: str,
@@ -137,106 +186,78 @@ async def parse_non_tool_sse_stream(
     done 输出结束标记和 usage 统计。
     """
     logger.info("开始处理 SSE 流（非工具模式）")
-    has_thinking = False
-    delta_content = None
-    buffer = ""
+    role_sent = False
     line_count = 0
     last_phase = None
     usage_data = {}
     citation_pending: list[str] = []
 
     try:
-        async for line in lines:
+        async for event in _iter_completion_events(lines):
             line_count += 1
-            if not line:
-                continue
-
-            buffer += line + "\n"
-            while "\n" in buffer:
-                current_line, buffer = buffer.split("\n", 1)
-                if not current_line.strip():
-                    continue
-
-                if not current_line.startswith("data:"):
-                    continue
-
-                chunk_str = current_line[5:].strip()
-                if not chunk_str or chunk_str == "[DONE]":
+            try:
+                if event.is_done:
                     yield "data: [DONE]\n\n"
                     continue
 
-                try:
-                    chunk = json.loads(chunk_str)
-                    if chunk.get("type") != "chat:completion":
-                        continue
+                data = event.data
+                phase = event.phase
+                last_phase = _log_phase_change(phase, last_phase)
 
-                    data = chunk.get("data", {})
-                    phase = data.get("phase")
+                logger.debug(
+                    "解析数据块: {}",
+                    event.raw[:1000] + "..." if len(event.raw) > 1000 else event.raw,
+                )
 
-                    if phase and phase != last_phase:
-                        logger.info("SSE 阶段: {}", phase)
-                        last_phase = phase
+                if event.usage:
+                    usage_data = event.usage
 
-                    logger.debug(
-                        "解析数据块: {}",
-                        chunk_str[:1000] + "..." if len(chunk_str) > 1000 else chunk_str,
-                    )
-                    
-                    if data.get("usage"):
-                        usage_data = data["usage"]
+                if phase == "tool_call":
+                    continue
 
-                    if phase == "tool_call":
-                        continue
+                elif phase == "tool_response":
+                    if not role_sent:
+                        role_sent = True
+                        yield _role_sse(chat_id, model)
+                    sse = _tool_response_sse(data, chat_id, model)
+                    if sse:
+                        yield sse
 
-                    elif phase == "tool_response":
-                        if not has_thinking:
-                            has_thinking = True
+                elif phase == "thinking":
+                    if not role_sent:
+                        role_sent = True
+                        yield _role_sse(chat_id, model)
+                    sse = _thinking_sse(data, chat_id, model)
+                    if sse:
+                        yield sse
+
+                elif phase in ("answer", "other"):
+                    edit_content = data.get("edit_content", "")
+                    delta_content = data.get("delta_content", "")
+
+                    if edit_content:
+                        if not role_sent:
+                            role_sent = True
                             yield _role_sse(chat_id, model)
-                        sse = _tool_response_sse(data, chat_id, model)
-                        if sse:
-                            yield sse
-
-                    elif phase == "thinking":
-                        if not has_thinking:
-                            has_thinking = True
+                        cleaned, citation_pending = _strip_citations(edit_content, citation_pending)
+                        if cleaned:
+                            yield _content_sse(cleaned, chat_id, model)
+                    elif delta_content:
+                        if not role_sent:
+                            role_sent = True
                             yield _role_sse(chat_id, model)
-                        sse = _thinking_sse(data, chat_id, model)
-                        if sse:
-                            yield sse
+                        cleaned, citation_pending = _strip_citations(delta_content, citation_pending)
+                        if cleaned:
+                            yield _content_sse(cleaned, chat_id, model)
 
-                    elif phase in ("answer", "other"):
-                        _pre_delta_content = delta_content if delta_content else None
-                        edit_content = data.get("edit_content", "")
-                        delta_content = data.get("delta_content", "")
+                elif phase == "done":
+                    if usage_data:
+                        logger.info("完成响应 - 使用统计: {}", json.dumps(usage_data))
+                    yield _finish_sse(chat_id, model, usage_data)
+                    yield "data: [DONE]\n\n"
 
-                        if edit_content:
-                            with_detail = "</details>" in edit_content
-                            if has_thinking and phase == "answer" and with_detail:
-                                sse = _thinking_with_edit_sse(edit_content, _pre_delta_content, chat_id, model)
-                                yield sse
-                            elif phase == "other":
-                                if edit_content:
-                                    cleaned, citation_pending = _strip_citations(edit_content, citation_pending)
-                                    if cleaned:
-                                        yield _content_sse(cleaned, chat_id, model)
-                        elif delta_content:
-                            if not has_thinking:
-                                has_thinking = True
-                                yield _role_sse(chat_id, model)
-                            cleaned, citation_pending = _strip_citations(delta_content, citation_pending)
-                            if cleaned:
-                                yield _content_sse(cleaned, chat_id, model)
-
-                    elif phase == "done":
-                        if usage_data:
-                            logger.info("完成响应 - 使用统计: {}", json.dumps(usage_data))
-                        yield _finish_sse(chat_id, model, usage_data)
-                        yield "data: [DONE]\n\n"
-
-                except json.JSONDecodeError as e:
-                    logger.debug("JSON解析错误: {}, 内容: {}", e, chunk_str[:1000])
-                except Exception as e:
-                    logger.error("处理chunk错误: {}, chunk: {}", e, chunk_str[:1000])
+            except Exception as e:
+                logger.error("处理chunk错误: {}, chunk: {}", e, event.raw[:1000])
 
         logger.info("SSE 流处理完成，共处理 {} 行数据", line_count)
 
@@ -263,114 +284,96 @@ async def parse_tool_prompt_sse_stream(
     might_be_tool_call = False
     is_tool_call_mode = False
     pending_content = ""
-    has_thinking = False
-    delta_content = None
+    role_sent = False
     last_phase = None
     usage_data = {}
     line_count = 0
     citation_pending: list[str] = []
 
     try:
-        async for line in lines:
+        async for event in _iter_completion_events(lines):
             line_count += 1
-            if not line:
-                continue
-
-            if not line.startswith("data:"):
-                continue
-
-            chunk_str = line[5:].strip()
-            if not chunk_str or chunk_str == "[DONE]":
-                continue
-
-            logger.debug(
-                "解析数据块: {}",
-                chunk_str[:1000] + "..." if len(chunk_str) > 1000 else chunk_str,
-            )
-
             try:
-                chunk = json.loads(chunk_str)
-                if chunk.get("type") != "chat:completion":
+                if event.is_done:
                     continue
 
-                data = chunk.get("data", {})
-                phase = data.get("phase")
+                data = event.data
+                phase = event.phase
+                last_phase = _log_phase_change(phase, last_phase)
 
-                if phase and phase != last_phase:
-                    logger.info("SSE 阶段: {}", phase)
-                    last_phase = phase
+                logger.debug(
+                    "解析数据块: {}",
+                    event.raw[:1000] + "..." if len(event.raw) > 1000 else event.raw,
+                )
 
-                if data.get("usage"):
-                    usage_data = data["usage"]
+                if event.usage:
+                    usage_data = event.usage
 
                 if phase == "tool_call":
                     continue
 
                 elif phase == "tool_response":
-                    if not has_thinking:
-                        has_thinking = True
+                    if not role_sent:
+                        role_sent = True
                         yield _role_sse(chat_id, model)
                     sse = _tool_response_sse(data, chat_id, model)
                     if sse:
                         yield sse
 
                 elif phase == "thinking":
-                    if not has_thinking:
-                        has_thinking = True
+                    if not role_sent:
+                        role_sent = True
                         yield _role_sse(chat_id, model)
                     sse = _thinking_sse(data, chat_id, model)
                     if sse:
                         yield sse
 
                 elif phase in ("answer", "other"):
-                    _pre_delta_content = delta_content if delta_content else None
                     edit_content = data.get("edit_content", "")
                     delta_content = data.get("delta_content", "")
 
                     if edit_content:
-                        with_detail = "</details>" in edit_content
-                        if has_thinking and phase == "answer" and with_detail:
-                            sse = _thinking_with_edit_sse(edit_content, _pre_delta_content, chat_id, model)
-                            yield sse
-                        elif phase == "other":
-                            if edit_content:
-                                full_content += edit_content
-                                if is_tool_call_mode:
-                                    continue
-                                trimmed = full_content.strip()
-                                if not might_be_tool_call:
-                                    if trimmed.startswith("{"):
-                                        might_be_tool_call = True
-                                        pending_content += edit_content
-                                    else:
-                                        cleaned, citation_pending = _strip_citations(edit_content, citation_pending)
-                                        if cleaned:
-                                            yield _content_sse(cleaned, chat_id, model)
+                        full_content += edit_content
+                        if is_tool_call_mode:
+                            continue
+
+                        if not role_sent:
+                            role_sent = True
+                            yield _role_sse(chat_id, model)
+
+                        trimmed = full_content.strip()
+                        if not might_be_tool_call:
+                            if trimmed.startswith("{"):
+                                might_be_tool_call = True
+                                pending_content += edit_content
+                                if _contains_tool_calls(trimmed):
+                                    is_tool_call_mode = True
+                                    pending_content = ""
+                            else:
+                                cleaned, citation_pending = _strip_citations(edit_content, citation_pending)
+                                if cleaned:
+                                    yield _content_sse(cleaned, chat_id, model)
+                        else:
+                            pending_content += edit_content
+                            if len(trimmed) >= 20:
+                                if _contains_tool_calls(trimmed):
+                                    is_tool_call_mode = True
+                                    pending_content = ""
                                 else:
-                                    pending_content += edit_content
-                                    if len(trimmed) >= 20:
-                                        if (
-                                            '"tool_calls"' in trimmed
-                                            or "'tool_calls'" in trimmed
-                                            or "tool_calls" in trimmed
-                                        ):
-                                            is_tool_call_mode = True
-                                            pending_content = ""
-                                        else:
-                                            might_be_tool_call = False
-                                            cleaned, citation_pending = _strip_citations(
-                                                pending_content, citation_pending
-                                            )
-                                            if cleaned:
-                                                yield _content_sse(cleaned, chat_id, model)
-                                            pending_content = ""
+                                    might_be_tool_call = False
+                                    cleaned, citation_pending = _strip_citations(
+                                        pending_content, citation_pending
+                                    )
+                                    if cleaned:
+                                        yield _content_sse(cleaned, chat_id, model)
+                                    pending_content = ""
                     elif delta_content:
                         full_content += delta_content
                         if is_tool_call_mode:
                             continue
 
-                        if not has_thinking:
-                            has_thinking = True
+                        if not role_sent:
+                            role_sent = True
                             yield _role_sse(chat_id, model)
 
                         trimmed = full_content.strip()
@@ -378,6 +381,9 @@ async def parse_tool_prompt_sse_stream(
                             if trimmed.startswith("{"):
                                 might_be_tool_call = True
                                 pending_content += delta_content
+                                if _contains_tool_calls(trimmed):
+                                    is_tool_call_mode = True
+                                    pending_content = ""
                             else:
                                 cleaned, citation_pending = _strip_citations(delta_content, citation_pending)
                                 if cleaned:
@@ -385,7 +391,7 @@ async def parse_tool_prompt_sse_stream(
                         else:
                             pending_content += delta_content
                             if len(trimmed) >= 20:
-                                if '"tool_calls"' in trimmed or "'tool_calls'" in trimmed or "tool_calls" in trimmed:
+                                if _contains_tool_calls(trimmed):
                                     is_tool_call_mode = True
                                     pending_content = ""
                                 else:
@@ -412,10 +418,8 @@ async def parse_tool_prompt_sse_stream(
                         yield _finish_sse(chat_id, model, usage_data)
                     yield "data: [DONE]\n\n"
 
-            except json.JSONDecodeError as e:
-                logger.debug("JSON解析错误: {}, 内容: {}", e, chunk_str[:1000])
             except Exception as e:
-                logger.error("处理chunk错误: {}, chunk: {}", e, chunk_str[:1000])
+                logger.error("处理chunk错误: {}, chunk: {}", e, event.raw[:1000])
 
         logger.info("SSE 流处理完成，共处理 {} 行数据", line_count)
 
