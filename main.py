@@ -59,8 +59,7 @@ def run_server():
     logger.info(f"🚀 启动 {service_name} 服务...")
     logger.info(f"📡 监听地址: 0.0.0.0:{settings.LISTEN_PORT}")
     logger.info(f"🔧 调试模式: {'✅ 开启' if settings.DEBUG_LOGGING else '❌ 关闭'}")
-    logger.info(f"🔓 跳过认证: {'✅ 开启' if settings.SKIP_AUTH_TOKEN else '❌ 关闭'}")
-    logger.info(f"🔑 令牌透传: {'✅ 开启' if settings.USE_CLIENT_TOKEN else '❌ 关闭'}")
+    logger.info("🔑 令牌模式: Authorization 等于 AUTH_TOKEN 时匿名，否则透传")
     logger.info(f"👻 匿名模式: {'✅ 开启' if settings.ANONYMOUS_MODE else '❌ 关闭'}")
 
     try:

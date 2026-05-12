@@ -18,7 +18,7 @@ logger = get_logger()
 async def get_zai_token(
     client_token: Optional[str] = None,
 ) -> str:
-    if settings.USE_CLIENT_TOKEN and client_token:
+    if client_token:
         logger.debug(f"使用客户端传递的 token: {client_token[:20]}...")
         return client_token
 

@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 import time
+from typing import Optional
+
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse
 
@@ -15,6 +17,21 @@ router = APIRouter()
 
 zai_provider = ZAIProvider()
 supported_models_set = set(SUPPORTED_MODELS)
+
+
+def resolve_client_zai_token(authorization: Optional[str]) -> Optional[str]:
+    if not authorization:
+        return None
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Missing or invalid Authorization header",
+        )
+
+    bearer_token = authorization[7:]
+    if not bearer_token or bearer_token == settings.AUTH_TOKEN:
+        return None
+    return bearer_token
 
 
 @router.get("/v1/models")
@@ -44,20 +61,10 @@ async def chat_completions(request: OpenAIRequest, authorization: str = Header(N
         )
 
     try:
-        client_api_key = None
-        if authorization and authorization.startswith("Bearer "):
-            client_api_key = authorization[7:]
-
-        if not settings.SKIP_AUTH_TOKEN:
-            if not authorization or not authorization.startswith("Bearer "):
-                raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
-            if not client_api_key:
-                raise HTTPException(status_code=401, detail="Missing API key")
-            if client_api_key != settings.AUTH_TOKEN:
-                raise HTTPException(status_code=401, detail="Invalid API key")
+        client_zai_token = resolve_client_zai_token(authorization)
 
         result = await zai_provider.chat_completion(
-            request, client_api_key=client_api_key
+            request, client_api_key=client_zai_token
         )
 
         if isinstance(result, dict) and "error" in result:

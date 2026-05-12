@@ -2,11 +2,13 @@
 # -*- coding: utf-8 -*-
 
 import os
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """Application settings"""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # API Configuration
     API_ENDPOINT: str = "https://chat.z.ai/api/chat/completions"
@@ -42,10 +44,6 @@ class Settings(BaseSettings):
 
     ANONYMOUS_MODE: bool = os.getenv("ANONYMOUS_MODE", "true").lower() == "true"
     TOOL_SUPPORT: bool = os.getenv("TOOL_SUPPORT", "true").lower() == "true"
-    SKIP_AUTH_TOKEN: bool = os.getenv("SKIP_AUTH_TOKEN", "false").lower() == "true"
-
-    # 是否使用客户端传递的 api_key 作为 Z.AI 认证 token
-    USE_CLIENT_TOKEN: bool = os.getenv("USE_CLIENT_TOKEN", "false").lower() == "true"
     # 请求结束后是否自动删除 Z.AI 上游会话
     AUTO_DELETE_UPSTREAM_CHAT: bool = (
         os.getenv("AUTO_DELETE_UPSTREAM_CHAT", "true").lower() == "true"
@@ -56,9 +54,5 @@ class Settings(BaseSettings):
 
     # X-FE-Version Header
     X_FE_VERSION: str = os.getenv("X_FE_VERSION", "prod-fe-1.0.106")
-
-    class Config:
-        env_file = ".env"
-
 
 settings = Settings()

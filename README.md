@@ -18,7 +18,7 @@
 - 🐳 **Docker 部署** - 一键容器化部署(环境变量请参考`.env.example`)
 - 🛡️ **会话隔离** - 匿名模式保护隐私
 - 🔧 **灵活配置** - 环境变量灵活配置
-- 🔄 **Token 池管理** - 自动轮询、容错恢复、动态更新
+- 🔑 **自动令牌识别** - 支持匿名模式与客户端 Z.AI token 透传
 - 🛡️ **错误处理** - 完善的异常捕获和重试机制
 
 ## 🚀 快速开始
@@ -47,7 +47,7 @@ python main.py
 
 > 🍋‍🟩 服务启动后访问接口文档：http://localhost:8080/docs  
 > 💡 **提示**：默认端口为 8080，可通过环境变量 `LISTEN_PORT` 修改  
-> ⚠️ **注意**：请勿将 `AUTH_TOKEN` 泄露给其他人，请使用 `AUTH_TOKENS` 配置多个认证令牌  
+> ⚠️ **注意**：`AUTH_TOKEN` 用于标识匿名模式；客户端传入不同于 `AUTH_TOKEN` 的 Bearer 值时会作为 Z.AI token 透传。
 
 ### 基础使用
 
@@ -85,7 +85,6 @@ docker run -d \
   -e ANONYMOUS_MODE="true" \
   -e DEBUG_LOGGING="true" \
   -e TOOL_SUPPORT="true" \
-  -v $(pwd)/tokens.txt:/app/tokens.txt \
   -v $(pwd)/logs:/app/logs \
   zyphrzero/z-ai2api-python:latest
 ```
@@ -110,7 +109,6 @@ services:
       - TOOL_SUPPORT=true
       - LISTEN_PORT=8080
     volumes:
-      - ./tokens.txt:/app/tokens.txt
       - ./logs:/app/logs
     restart: unless-stopped
     healthcheck:
@@ -149,7 +147,6 @@ docker run -d \
   --name z-ai2api \
   -p 8080:8080 \
   -e AUTH_TOKEN="sk-your-api-key" \
-  -v $(pwd)/tokens.txt:/app/tokens.txt \
   -v $(pwd)/logs:/app/logs \
   -v $(pwd)/.env:/app/.env \
   zyphrzero/z-ai2api-python:latest
@@ -174,15 +171,12 @@ docker run -d \
 #### 基础配置
 | 变量名                | 默认值                                    | 说明                   |
 | --------------------- | ----------------------------------------- | ---------------------- |
-| `AUTH_TOKEN`          | `sk-your-api-key`                         | 客户端认证密钥         |
+| `AUTH_TOKEN`          | `sk-your-api-key`                         | 匿名模式标识令牌       |
 | `LISTEN_PORT`         | `8080`                                    | 服务监听端口           |
 | `DEBUG_LOGGING`       | `true`                                    | 调试日志开关           |
 | `ANONYMOUS_MODE`      | `true`                                    | 匿名用户模式开关           |
 | `TOOL_SUPPORT`        | `true`                                    | Function Call 功能开关 |
-| `SKIP_AUTH_TOKEN`     | `false`                                   | 跳过认证令牌验证       |
 | `SCAN_LIMIT`          | `200000`                                  | 扫描限制               |
-| `AUTH_TOKENS_FILE`    | `tokens.txt`                              | Z.AI 认证token文件路径 |
-| `USE_CLIENT_TOKEN`    | `false`                                   | 使用客户端传递的 api_key 作为 Z.AI 认证 token |
 
 > 💡 详细配置请查看 `.env.example` 文件
 
@@ -191,49 +185,35 @@ docker run -d \
 ### Z.AI 提供商
 ```bash
 # Z.AI 认证配置
-AUTH_TOKENS_FILE=tokens.txt
+AUTH_TOKEN=sk-your-api-key
 ANONYMOUS_MODE=true
 ```
 
-## 🔄 Token池机制
-
-### 功能特性
-
-- **负载均衡**：轮询使用多个auth token，分散请求负载
-- **自动容错**：token失败时自动切换到下一个可用token
-- **健康监控**：基于Z.AI API的role字段精确验证token类型
-- **自动恢复**：失败token在超时后自动重新尝试
-- **动态管理**：支持运行时更新token池
-- **智能去重**：自动检测和去除重复token
-- **类型验证**：只接受认证用户token (role: "user")，拒绝匿名token (role: "guest")
-- **回退机制**：认证模式失败时自动回退到匿名模式，*匿名模式无法回退到认证模式*
-
-## 🆕 动态 API Key 模式
+## 🆕 令牌识别模式
 
 ### 功能说明
 
-动态 API Key 模式允许客户端直接传递 Z.AI 认证 token，而不需要预配置在服务器端。这种模式特别适合：
+服务会根据客户端请求中的 `Authorization` 自动选择 Z.AI 令牌来源，不需要配置本地 token 文件。这种模式特别适合：
 
 - **多租户场景**：每个客户端使用自己的 Z.AI token
 - **开发测试**：快速测试不同的 token 而无需修改服务器配置
 - **token 轮换**：客户端可以动态更新 token 而不重启服务
 
-### 配置方式
-
-```bash
-# 启用动态 API Key 模式
-USE_CLIENT_TOKEN=true
-
-# 跳过客户端认证（可选）
-SKIP_AUTH_TOKEN=true
-
-# 关闭匿名模式（强制使用认证 token）
-ANONYMOUS_MODE=false
-```
-
 ### 使用方式
 
-客户端在请求头中传递 Z.AI token：
+匿名模式请求可以不传 `Authorization`，或传入与 `AUTH_TOKEN` 一致的 Bearer 值：
+
+```bash
+curl -X POST "http://localhost:8080/v1/chat/completions" \
+  -H "Authorization: Bearer sk-your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "GLM-4.5",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+```
+
+客户端传入不同于 `AUTH_TOKEN` 的 Bearer 值时，该值会作为 Z.AI token 透传：
 
 ```bash
 curl -X POST "http://localhost:8080/v1/chat/completions" \
@@ -245,37 +225,16 @@ curl -X POST "http://localhost:8080/v1/chat/completions" \
   }'
 ```
 
-### Token 优先级
+### Token 选择规则
 
-当 `USE_CLIENT_TOKEN=true` 时，token 获取优先级为：
-
-1. **客户端传递的 token**（最高优先级）
-2. **Token 池中的 token**
-3. **预配置的 AUTH_TOKEN**
-4. **匿名访客 token**（仅当 ANONYMOUS_MODE=true）
+1. **非 `AUTH_TOKEN` 的 Bearer 值**：作为 Z.AI token 透传。
+2. **无 `Authorization` 或 Bearer 值等于 `AUTH_TOKEN`**：当 `ANONYMOUS_MODE=true` 时获取匿名访客 token。
+3. **无法透传且 `ANONYMOUS_MODE=false`**：请求失败。
 
 ### 安全注意事项
 
-- ⚠️ 启用 `USE_CLIENT_TOKEN` 时，建议同时启用 `SKIP_AUTH_TOKEN=false` 以确保客户端认证
-- ⚠️ 客户端传递的 token 不会被存储到 token 池中，仅单次请求有效
+- ⚠️ 客户端传递的 Z.AI token 不会被存储，仅单次请求有效
 - ⚠️ 建议在受信任的网络环境中使用此功能
-
-## 监控API
-
-> 仅有基础功能，暂未完善
-
-```bash
-# 查看token池状态
-curl http://localhost:8080/v1/token-pool/status
-
-# 手动健康检查
-curl -X POST http://localhost:8080/v1/token-pool/health-check
-
-# 动态更新token池
-curl -X POST http://localhost:8080/v1/token-pool/update \
-  -H "Content-Type: application/json" \
-  -d '["new_token1", "new_token2"]'
-```
 
 ## 🎯 使用场景
 
